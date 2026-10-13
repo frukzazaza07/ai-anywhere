@@ -2,6 +2,7 @@ node_modules/
 dist/
 node-24/
 *.log
+.verification/
 
 # Local environment settings and backups; keep the placeholder template.
 .env
@@ -19,3 +20,6 @@ ai.config.json~
 .codex-schedules.json
 .codex-schedules.json.*
 .codex-schedules.json~
+.ai-preferences.json
+.ai-preferences.json.*
+.ai-preferences.json~

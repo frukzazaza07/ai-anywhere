@@ -1,18 +1,27 @@
 {
   "name": "codex-discord-ts",
-  "version": "1.0.0",
+  "version": "1.0.0-beta.1",
+  "description": "Self-hosted Discord bot for trusted users of local AI coding CLIs",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "engines": {
     "node": ">=24.17.0"
   },
   "scripts": {
+    "models": "node --import tsx src/models-cli.ts",
+    "doctor": "node --import tsx src/doctor-cli.ts",
+    "release:check": "node scripts/release-check.mjs",
     "register": "node --import tsx src/register.ts",
     "dev": "node --import tsx src/bot.ts",
     "build": "tsc",
     "start": "node dist/bot.js",
     "test": "node --import tsx --test test/*.test.ts"
   },
+  "files": [
+    "src/", "test/", "scripts/", "docs/", "tasks/", "*.md", "LICENSE",
+    "tsconfig.json", ".env.example", "ai.config.example.json"
+  ],
   "dependencies": {
     "@openai/codex": "0.162.1",
     "discord.js": "14.27.0",

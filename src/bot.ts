@@ -5,20 +5,30 @@ import { discordConfig, workerConfig } from './config.js';
 import { commandNames } from './commands.js';
 import { ProjectSessions } from './project-sessions.js';
 import { type ProjectSelection } from './projects.js';
-import { providerLabels, isProviderId } from './providers.js';
+import { cliDefaultModel, providerLabels, isProviderId } from './providers.js';
 import { RuntimeConfig, type ConfigChange } from './runtime-config.js';
-import { autocomplete, authorized, selectCommand, type SelectedProfile } from './selection.js';
+import { autocomplete, authorized, type SelectedProfile } from './selection.js';
 import { manageConfig } from './admin-config.js';
+import { initializeConfig } from './init-config.js';
+import { initDialogPrefix, initializationDialog, submitInitialization } from './init-dialog.js';
 import { helpReply } from './help.js';
 import { codexLimitsStatus } from './limits.js';
 import { deliverTaskReply, taskErrorMessage, taskReply } from './results.js';
+import { Shutdown } from './shutdown.js';
+import { modelCatalog, modelsText } from './models.js';
+import { ProviderPreferences } from './provider-preferences.js';
+import { configPickerPrefix, configPicker, updateConfigPicker } from './config-picker.js';
+import { ModelCatalogService } from './model-catalog-service.js';
 
 const discord = discordConfig();
 let sessions: ProjectSessions;
 const runtime = new RuntimeConfig({ file: resolve('ai.config.json'), overridesFile: resolve('.ai-config-overrides.json'),
-  busy: () => sessions?.busy ?? false });
+  allowSetup: true, busy: () => sessions?.busy ?? false });
 await runtime.load();
+if (runtime.value.source === 'setup') console.log('Initial setup required: run /ai init as an allowed admin. The default project candidate is the bot startup directory.');
 const worker = workerConfig(runtime.value);
+const preferences = new ProviderPreferences(resolve('.ai-preferences.json'));
+await preferences.load();
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 sessions = new ProjectSessions({ ...worker, runtime });
 const auth = { guildId: discord.guildId, allowedUsers: worker.allowedUsers, adminUsers: worker.adminUsers };
@@ -32,24 +42,67 @@ const scheduler = new CodexScheduler({
   busy: () => sessions.busy, run: (key, prompt, selection, project) => sessions.prompt(key, prompt, selection, project),
 });
 await scheduler.load();
+const shutdown = new Shutdown({ stopScheduler: () => scheduler.shutdown(),
+  stopWorker: () => sessions.shutdown(), closeClient: () => client.destroy() });
+const catalogs = new ModelCatalogService(runtime, undefined, () => sessions.busy || shutdown.stopping);
+for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(signal, () => {
+    if (!shutdown.stopping) console.log('Shutting down; waiting for accepted tasks to finish.');
+    void shutdown.stop().catch(() => {
+      console.error('Shutdown could not persist schedule state. Check local storage before restarting.');
+      process.exitCode = 1;
+    });
+  });
+}
 client.once(Events.ClientReady, ready => {
+  if (shutdown.stopping) return;
   console.log('Ready as ' + ready.user.tag);
   scheduler.start();
 });
 client.on(Events.Error, () => console.error('Discord connection error.'));
 client.on(Events.InteractionCreate, interaction => {
-  void handle().catch(() => console.error('Unable to handle Discord interaction.'));
+  if (shutdown.stopping) return;
+  const handler = handle().catch(() => console.error('Unable to handle Discord interaction.'));
+  shutdown.track(handler);
   async function handle() {
     const access = { guildId: interaction.guildId, userId: interaction.user.id };
+    const key = `${interaction.guildId}:${interaction.channelId}:${interaction.user.id}`;
+    if ((interaction.isStringSelectMenu() || interaction.isButton()) && interaction.customId.startsWith(configPickerPrefix)) {
+      await interaction.deferUpdate();
+      try {
+        if (shutdown.stopping) throw new Error('AI_SHUTTING_DOWN');
+        await interaction.editReply(await updateConfigPicker(runtime, preferences, key, access, auth, interaction.customId,
+          interaction.isStringSelectMenu() ? interaction.values[0] : undefined, catalogs));
+      } catch (error) {
+        await interaction.followUp({ ...taskReply(taskErrorMessage(error)), flags: MessageFlags.Ephemeral });
+      }
+      return;
+    }
+    if (interaction.isModalSubmit() && interaction.customId.startsWith(initDialogPrefix)) {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      try {
+        if (shutdown.stopping) throw new Error('AI_SHUTTING_DOWN');
+        await interaction.editReply(taskReply(await submitInitialization(runtime, access, auth, interaction.customId,
+          interaction.fields.getTextInputValue('project'), interaction.fields.getTextInputValue('profile'))));
+      } catch (error) { await interaction.editReply(taskReply(taskErrorMessage(error))); }
+      return;
+    }
     if (interaction.isAutocomplete()) {
       if (!commandNames.has(interaction.commandName)) return;
       const focused = interaction.options.getFocused(true);
+      const profile = interaction.options.getString('profile');
+      const provider = interaction.options.getString('provider') ?? (profile == null ? preferences.selectedProvider(key) : undefined);
+      const saved = provider && isProviderId(provider) ? preferences.get(key, provider) : undefined;
       await interaction.respond(autocomplete(runtime.value, access, auth, interaction.commandName,
-        focused.name, String(focused.value), interaction.options.getString('provider')));
+        focused.name, String(focused.value), provider,
+        interaction.commandName === 'ai' && interaction.options.getSubcommand(false) === 'init',
+        profile, interaction.options.getString('model')
+          ?? (saved && Object.hasOwn(saved, 'model') ? saved.model ?? cliDefaultModel : undefined)));
       return;
     }
     if (!interaction.isChatInputCommand() || !commandNames.has(interaction.commandName)) return;
-    if (!authorized(access, auth, interaction.commandName === 'ai-admin')) {
+    const action = interaction.options.getSubcommand(false) ?? 'run';
+    if (!authorized(access, auth, interaction.commandName === 'ai-admin' || (interaction.commandName === 'ai' && action === 'init'))) {
       await interaction.reply({ content: 'คุณไม่มีสิทธิ์ใช้บอตนี้', flags: MessageFlags.Ephemeral,
         allowedMentions: { parse: [] } });
       return;
@@ -58,8 +111,46 @@ client.on(Events.InteractionCreate, interaction => {
       await interaction.reply({ ...helpReply(interaction.options.getString('topic')), flags: MessageFlags.Ephemeral });
       return;
     }
-    const action = interaction.options.getSubcommand(false) ?? 'run';
-    const key = `${interaction.guildId}:${interaction.channelId}:${interaction.user.id}`;
+    if (interaction.commandName === 'ai' && action === 'config') {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      try {
+        const selectedProvider = interaction.options.getString('provider') ?? preferences.selectedProvider(key) ?? runtime.value.providers.defaultProvider;
+        const note = await catalogs.refresh(selectedProvider);
+        await runtime.exclusive(async () => {
+          if (shutdown.stopping) throw new Error('AI_SHUTTING_DOWN');
+          const provider = interaction.options.getString('provider') ?? preferences.selectedProvider(key) ?? runtime.value.providers.defaultProvider;
+          let model = interaction.options.getString('model') ?? undefined;
+          const effort = interaction.options.getString('effort') ?? undefined;
+          if (model === undefined && effort !== undefined && interaction.options.getString('provider') === null
+            && !preferences.selectedProvider(key)) model = preferences.resolve(runtime.value, key).model ?? cliDefaultModel;
+          if (interaction.options.getString('provider') !== null || model !== undefined || effort !== undefined) {
+            await preferences.save(runtime.value, key, provider, { model, effort });
+          }
+          await interaction.editReply(configPicker(runtime, preferences, key, access, auth, interaction.options.getString('provider'), 0, note));
+        });
+      } catch (error) { await interaction.editReply(taskReply(taskErrorMessage(error))); }
+      return;
+    }
+    if (interaction.commandName === 'ai' && action === 'init') {
+      const defaults = { project: interaction.options.getString('project') ?? undefined,
+        profile: interaction.options.getString('profile') ?? undefined };
+      if (runtime.value.source !== 'file' && defaults.project === undefined && defaults.profile === undefined) {
+        try {
+          if (shutdown.stopping) throw new Error('AI_SHUTTING_DOWN');
+          if (sessions.busy || runtime.updating) throw new Error('CODEX_BUSY');
+          await interaction.showModal(initializationDialog(runtime, access, auth));
+        } catch (error) {
+          await interaction.reply({ ...taskReply(taskErrorMessage(error)), flags: MessageFlags.Ephemeral });
+        }
+        return;
+      }
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      try {
+        if (shutdown.stopping) throw new Error('AI_SHUTTING_DOWN');
+        await interaction.editReply(taskReply(await initializeConfig(runtime, access, auth, defaults)));
+      } catch (error) { await interaction.editReply(taskReply(taskErrorMessage(error))); }
+      return;
+    }
     if (interaction.commandName === 'ai-admin') {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       try {
@@ -108,12 +199,32 @@ client.on(Events.InteractionCreate, interaction => {
       } catch { await interaction.editReply(taskReply('Unable to save schedule cancellation. Try again.')); }
       return;
     }
+    if (action === 'models') {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      try {
+        const provider = interaction.options.getString('provider')
+          ?? (interaction.options.getString('profile') ? runtime.value.profiles.get(interaction.options.getString('profile')!)?.provider
+            : preferences.selectedProvider(key)) ?? runtime.value.providers.defaultProvider;
+        const note = await catalogs.refresh(provider);
+        const selected = preferences.resolve(runtime.value, key, interaction.options.getString('provider'), interaction.options.getString('profile'));
+        const catalog = modelCatalog(runtime.value, interaction.options.getString('provider'), interaction.options.getString('profile'), selected);
+        catalog.discoveryNote = note;
+        await interaction.editReply(taskReply(modelsText(catalog), catalog.provider));
+      } catch (error) {
+        await interaction.editReply(taskReply(taskErrorMessage(error)));
+      }
+      return;
+    }
     let selection: SelectedProfile;
     let project: ProjectSelection;
     const revision = runtime.value.revision;
-    const checkRevision = () => { if (runtime.value.revision !== revision) throw new Error('AI_INVALID_SELECTION'); };
+    const checkRevision = () => {
+      if (shutdown.stopping) throw new Error('AI_SHUTTING_DOWN');
+      if (runtime.value.revision !== revision) throw new Error('AI_INVALID_SELECTION');
+    };
     try {
-      selection = selectCommand(runtime.value, interaction.options.getString('provider'), interaction.options.getString('profile'));
+      selection = preferences.resolve(runtime.value, key, interaction.options.getString('provider'), interaction.options.getString('profile'),
+        interaction.options.getString('model'), interaction.options.getString('effort'));
       project = sessions.currentProject(key, interaction.options.getString('project'));
     } catch (error) {
       await interaction.reply({ ...taskReply(taskErrorMessage(error)), flags: MessageFlags.Ephemeral });
@@ -121,8 +232,8 @@ client.on(Events.InteractionCreate, interaction => {
     }
     const label = providerLabels[selection.provider];
     const resultCommand = (selection.profile ? '/ai result profile:' + selection.profile
-      : '/ai result provider:' + selection.provider)
-      + ' project:' + project.project;
+      : '/ai result provider:' + selection.provider + ' model:' + (selection.model ?? cliDefaultModel))
+      + (selection.effort ? ' effort:' + selection.effort : '') + ' project:' + project.project;
     if (action === 'status') {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       try {
@@ -168,6 +279,7 @@ client.on(Events.InteractionCreate, interaction => {
             + '\nNext run: <t:' + Math.floor(job.nextRun / 1000) + ':F>'
             + (job.intervalMs ? '\nRepeats every ' + job.intervalMs / 1000 + ' seconds.' : '\nRuns once.')
             + '\nProvider: ' + label + ' | Model: ' + (selection.model ?? 'CLI default')
+            + ' | Effort: ' + (selection.effort ?? 'CLI default')
             + '\nProject: ' + project.project
             + (selection.profile ? '\nProfile: ' + selection.profile : '')
             + '\nUse /ai schedules to inspect, /ai cancel id:… to cancel, and ' + resultCommand + ' after completion.',
@@ -206,7 +318,8 @@ client.on(Events.InteractionCreate, interaction => {
       // Acknowledge immediately; jobs may take several minutes.
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       await interaction.editReply({
-        content: label + ' is running in project ' + project.project + '. Retrieve the saved result with ' + resultCommand + ' in this user/channel if this reply expires.',
+        content: label + ' is running in project ' + project.project + ' | Model: ' + (selection.model ?? 'CLI default')
+          + ' | Effort: ' + (selection.effort ?? 'CLI default') + '. Retrieve the saved result with ' + resultCommand + ' in this user/channel if this reply expires.',
         allowedMentions: { parse: [] },
       });
       const started = await runtime.exclusive(() => {
@@ -227,4 +340,9 @@ client.on(Events.InteractionCreate, interaction => {
   }
 });
 
-await client.login(discord.token);
+try { await client.login(discord.token); }
+catch {
+  await shutdown.stop();
+  console.error('Unable to log in to Discord. Check local credentials and connectivity.');
+  process.exitCode = 1;
+}

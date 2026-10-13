@@ -13,7 +13,7 @@ test('/ai offers scheduling options and management subcommands', () => {
   assert.deepEqual(definitions.map(command => command.name), ['ai', 'ai-admin', 'help']);
   assert.deepEqual([...commandNames], ['ai', 'ai-admin', 'help']);
   const actions = definitions[0]?.options ?? [];
-  assert.deepEqual(actions.map(action => action.name), ['run', 'new', 'status', 'clear', 'result', 'schedules', 'cancel', 'projects', 'project']);
+  assert.deepEqual(actions.map(action => action.name), ['run', 'new', 'status', 'clear', 'result', 'models', 'config', 'schedules', 'cancel', 'projects', 'project', 'init']);
   assert.ok(actions.every(action => action.type === 1));
   const run = actions[0];
   assert.ok(run && run.type === 1);
@@ -23,11 +23,12 @@ test('/ai offers scheduling options and management subcommands', () => {
   assert.equal(prompt.required, true);
   assert.equal(prompt.min_length, 1);
   assert.equal(prompt.max_length, 4000);
-  assert.deepEqual(run.options?.map(option => option.name), ['prompt', 'at', 'after', 'every', 'provider', 'profile', 'project']);
+  assert.deepEqual(run.options?.map(option => option.name), ['prompt', 'at', 'after', 'every', 'provider', 'profile', 'model', 'effort', 'project']);
   assert.ok(run.options?.slice(1).every(option => !option.required));
   assert.ok(actions.slice(1, 5).every(action => action.type === 1 && action.options?.some(option => option.name === 'project')));
-  assert.ok(actions[5]?.type === 1 && !actions[5].options?.length);
-  const cancel = actions[6];
+  const schedules = actions.find(action => action.name === 'schedules');
+  assert.ok(schedules?.type === 1 && !schedules.options?.length);
+  const cancel = actions.find(action => action.name === 'cancel');
   assert.ok(cancel && cancel.type === 1);
   assert.equal(cancel.options?.[0]?.name, 'id');
   assert.equal(cancel.options?.[0]?.required, true);

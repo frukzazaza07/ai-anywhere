@@ -67,6 +67,29 @@ test('provider configuration defaults to Codex and validates enabled providers, 
 });
 
 for (const provider of ['claude', 'gemini'] as const) {
+  test(provider + ' applies effort in the real mock CLI request while retaining restricted tools', async t => {
+    const f = await fixture(t, provider === 'claude' ? '2.1.248' : '0.63.0');
+    const models = provider === 'claude' ? ['sonnet'] : ['gemini-3-pro-preview', 'gemini-2.5-flash'];
+    for (const model of models) {
+      const answer = JSON.parse(await runAgent('inspect only', { provider, model, effort: 'high', workdir: f.directory,
+        sandbox: 'read-only', cliScript: f.script, timeoutMs: 5000 }));
+      assert.equal(answer.text, 'inspect only');
+      if (provider === 'claude') {
+        assert.equal(answer.args[answer.args.indexOf('--effort') + 1], 'high');
+        assert.equal(answer.args[answer.args.indexOf('--tools') + 1], 'Read,Glob,Grep');
+      } else {
+        const override = answer.settings.modelConfigs.customOverrides.at(-1);
+        assert.deepEqual(override.match, { model });
+        assert.deepEqual(override.modelConfig.generateContentConfig.thinkingConfig,
+          model.startsWith('gemini-2.5') ? { thinkingBudget: 24576 } : { thinkingLevel: 'HIGH' });
+        assert.ok(!answer.settings.tools.core.includes('run_shell_command'));
+        assert.equal(answer.settings.hooksConfig.enabled, false);
+        assert.equal(answer.settings.admin.mcp.enabled, false);
+      }
+    }
+    await assert.rejects(runAgent('inspect', { provider, model: 'test-model', effort: 'ultra',
+      workdir: f.directory, sandbox: 'read-only', cliScript: f.script }), /AI_EFFORT_INVALID/);
+  });
   test(provider + ' sends stdin intact, filters credentials and resumes explicit sessions with the configured model', async t => {
     const f = await fixture(t, provider === 'claude' ? '2.1.248' : '0.63.0');
     const old = process.env.DISCORD_TOKEN;

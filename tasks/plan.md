@@ -1,5 +1,9 @@
 # Implementation plan: Configured project switching
 
+Model selection extension: see [SPEC-model-selection.md](../SPEC-model-selection.md).
+Add catalog/selection logic, bounded Codex discovery and terminal listing, then
+Discord schema/routing/help. Verify the strict build and offline regressions.
+
 1. Add allowlisted project configuration and selection state; verify directory validation and per-user/channel selection.
 2. Add a project session facade around provider sessions, preserving one shared busy guard and isolating paths.
 3. Add project snapshot fields and legacy directory-based schedule migration; verify remapping/removal pauses.

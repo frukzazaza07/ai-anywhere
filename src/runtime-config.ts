@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { realpathSync, statSync } from 'node:fs';
-import { readFile, writeFile, rename, rm } from 'node:fs/promises';
+import { readFile, writeFile, rename, rm, link } from 'node:fs/promises';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { providerConfig } from './config.js';
 import { isProjectName, projectConfig, type ProjectConfig } from './projects.js';
 import { isModelName, isProviderId, providerIds, type ProviderConfig, type ProviderId } from './providers.js';
+import { parseModelCatalog, type CliModel } from './model-catalog.js';
 
 export interface Profile { provider: ProviderId; model?: string }
 interface LocalProject { directory: string; enabled: boolean }
@@ -17,6 +18,7 @@ interface BaseConfig {
   defaultProfile: string;
 }
 export interface ConfigOverrides {
+  catalogs?: Partial<Record<ProviderId, CliModel[]>>;
   projects?: Record<string, boolean>;
   providers?: Partial<Record<ProviderId, boolean>>;
   profiles?: Record<string, Profile | null>;
@@ -25,7 +27,7 @@ export interface ConfigOverrides {
 }
 export interface RuntimeSnapshot {
   revision: number;
-  source: 'file' | 'environment';
+  source: 'file' | 'environment' | 'setup';
   projects: ProjectConfig;
   providers: ProviderConfig;
   installedProviders: ReadonlySet<ProviderId>;
@@ -85,8 +87,15 @@ function parseBase(value: unknown, baseDirectory: string): BaseConfig {
   return { projects, providers, profiles, defaultProject: name(data.defaultProject), defaultProfile: name(data.defaultProfile) };
 }
 function parseOverrides(value: unknown): ConfigOverrides {
-  const data = object(value, ['projects', 'providers', 'profiles', 'defaultProject', 'defaultProfile']);
+  const data = object(value, ['projects', 'providers', 'profiles', 'defaultProject', 'defaultProfile', 'catalogs']);
   const result: ConfigOverrides = {};
+  if (data.catalogs !== undefined) {
+    result.catalogs = {};
+    for (const [key, value] of Object.entries(object(data.catalogs))) {
+      if (!isProviderId(key)) return invalid();
+      result.catalogs[key] = parseModelCatalog(value);
+    }
+  }
   if (data.projects !== undefined) result.projects = Object.fromEntries(Object.entries(object(data.projects))
     .map(([key, value]) => [name(key), enabled(value)]));
   if (data.providers !== undefined) {
@@ -117,6 +126,13 @@ function legacyBase(env: NodeJS.ProcessEnv, directory: string): BaseConfig {
 }
 function snapshot(base: BaseConfig, overrides: ConfigOverrides, revision: number, source: RuntimeSnapshot['source']): RuntimeSnapshot {
   const merged = structuredClone(base);
+  const modelEfforts: NonNullable<ProviderConfig['modelEfforts']> = {};
+  for (const [key, value] of Object.entries(overrides.catalogs ?? {})) {
+    if (!isProviderId(key) || !merged.providers[key]) return invalid();
+    const models = parseModelCatalog(value);
+    merged.providers[key]!.models = [...new Set([...merged.providers[key]!.models, ...models.map(item => item.model)])];
+    modelEfforts[key] = Object.fromEntries(models.filter(item => item.efforts !== undefined).map(item => [item.model, item.efforts!]));
+  }
   for (const [key, value] of Object.entries(overrides.projects ?? {})) {
     if (!Object.hasOwn(merged.projects, key)) return invalid();
     merged.projects[key]!.enabled = value;
@@ -150,7 +166,7 @@ function snapshot(base: BaseConfig, overrides: ConfigOverrides, revision: number
     projects: { directories: new Map(Object.entries(merged.projects).map(([key, p]) => [key, p.directory])),
       enabled: new Set(Object.keys(merged.projects).filter(key => merged.projects[key]!.enabled)), defaultProject: merged.defaultProject },
     providers: { enabled: new Set(providerIds.filter(id => merged.providers[id]?.enabled)),
-      defaultProvider: defaultProfile.provider, models, allowedModels,
+      defaultProvider: defaultProfile.provider, models, allowedModels, modelEfforts,
       claudeExecutable: merged.providers.claude?.executable, geminiScript: merged.providers.gemini?.script },
     installedProviders: new Set(providerIds.filter(id => merged.providers[id])), profiles: new Map(Object.entries(merged.profiles)) };
 }
@@ -160,15 +176,27 @@ export async function atomicConfigWrite(file: string, text: string): Promise<voi
   try { await writeFile(temporary, text, { flag: 'wx', mode: 0o600 }); await rename(temporary, file); }
   finally { await rm(temporary, { force: true }); }
 }
+export async function atomicConfigCreate(file: string, text: string): Promise<void> {
+  const temporary = file + '.' + randomUUID() + '.tmp';
+  try {
+    await writeFile(temporary, text, { flag: 'wx', mode: 0o600 });
+    // Publish the completed file without replacing an operator's concurrent copy.
+    await link(temporary, file);
+  } finally { await rm(temporary, { force: true }); }
+}
+export interface InitDefaults { project?: string; profile?: string; revision?: number }
 interface RuntimeOptions {
   file: string;
   overridesFile: string;
   env?: NodeJS.ProcessEnv;
+  allowSetup?: boolean;
   busy?: () => boolean;
   write?: typeof atomicConfigWrite;
+  create?: typeof atomicConfigCreate;
 }
 /** Publishes a validated generation only after durable overrides are written. */
 export class RuntimeConfig {
+  readonly instanceId = randomUUID();
   private base!: BaseConfig;
   private overrides: ConfigOverrides = {};
   private current!: RuntimeSnapshot;
@@ -190,7 +218,19 @@ export class RuntimeConfig {
     let text: string | undefined;
     try { text = await readFile(this.options.file, 'utf8'); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
-    if (text === undefined) { source = 'environment'; base = legacyBase(this.options.env ?? process.env, dirname(this.options.file)); }
+    if (text === undefined) {
+      source = 'environment';
+      const env = this.options.env ?? process.env;
+      const directory = dirname(this.options.file);
+      let projectsValid = true;
+      try { projectConfig(env, directory); } catch { projectsValid = false; }
+      if (!projectsValid && this.options.allowSetup) {
+        // This candidate is fixed on the host, never supplied through Discord.
+        source = 'setup';
+        base = legacyBase({ ...env, AI_PROJECTS: '', AI_WORKDIR: directory,
+          CODEX_WORKDIR: '', AI_DEFAULT_PROJECT: 'default' }, directory);
+      } else base = legacyBase(env, directory);
+    }
     else base = parseBase(JSON.parse(text), dirname(this.options.file));
     let overrides: ConfigOverrides = {};
     try { overrides = parseOverrides(JSON.parse(await readFile(this.options.overridesFile, 'utf8'))); }
@@ -198,6 +238,22 @@ export class RuntimeConfig {
     return { base, overrides, source };
   }
   async load(): Promise<void> { await this.reload(); }
+  /** Trust only catalogs returned by fixed local metadata adapters, never chat-provided IDs. */
+  async updateModelCatalog(provider: ProviderId, models: readonly CliModel[], revision = this.current.revision): Promise<void> {
+    const catalog = parseModelCatalog(models);
+    if (revision !== this.current.revision) throw new Error('AI_CONFIG_PICKER_STALE');
+    if (!this.current.providers.enabled.has(provider)) throw new Error('AI_PROVIDER_DISABLED');
+    if (JSON.stringify(this.overrides.catalogs?.[provider] ?? []) === JSON.stringify(catalog)) return;
+    await this.mutate(async () => {
+      if (revision !== this.current.revision) throw new Error('AI_CONFIG_PICKER_STALE');
+      const overrides = structuredClone(this.overrides);
+      (overrides.catalogs ??= {})[provider] = catalog;
+      const next = snapshot(this.base, overrides, this.current.revision + 1, this.current.source);
+      try { await (this.options.write ?? atomicConfigWrite)(this.options.overridesFile, JSON.stringify(overrides, null, 2) + '\n'); }
+      catch { throw new Error('AI_CONFIG_SAVE'); }
+      this.overrides = overrides; this.current = next;
+    });
+  }
   async reload(): Promise<void> {
     return this.mutate(async () => {
       let loaded: Awaited<ReturnType<RuntimeConfig['read']>>;
@@ -206,6 +262,38 @@ export class RuntimeConfig {
       catch { throw new Error('AI_CONFIG_INVALID'); }
       this.base = loaded.base; this.overrides = loaded.overrides; this.current = next;
     });
+  }
+  async initialize(defaults: InitDefaults = {}): Promise<boolean> {
+    let created = false;
+    await this.mutate(async () => {
+      if (defaults.revision !== undefined && defaults.revision !== this.current.revision) throw new Error('AI_INIT_STALE');
+      if (this.current.source === 'file') return;
+      let loaded: Awaited<ReturnType<RuntimeConfig['read']>>;
+      let base: BaseConfig;
+      let next: RuntimeSnapshot;
+      try {
+        loaded = await this.read();
+        if (loaded.source === 'file') throw new Error('AI_CONFIG_EXISTS');
+        base = parseBase({ version: 1, ...loaded.base,
+          defaultProject: defaults.project === undefined ? loaded.base.defaultProject : name(defaults.project),
+          defaultProfile: defaults.profile === undefined ? loaded.base.defaultProfile : name(defaults.profile) }, dirname(this.options.file));
+        next = snapshot(base, loaded.overrides, this.current.revision + 1, 'file');
+        if ((defaults.project !== undefined && next.projects.defaultProject !== defaults.project)
+          || (defaults.profile !== undefined && next.defaultProfile !== defaults.profile)) throw new Error('AI_INIT_DEFAULT_OVERRIDE');
+      } catch (error) {
+        if (error instanceof Error && ['AI_CONFIG_EXISTS', 'AI_INIT_DEFAULT_OVERRIDE'].includes(error.message)) throw error;
+        throw new Error('AI_CONFIG_INVALID');
+      }
+      try {
+        await (this.options.create ?? atomicConfigCreate)(this.options.file, JSON.stringify({ version: 1, ...base }, null, 2) + '\n');
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new Error('AI_CONFIG_EXISTS');
+        throw new Error('AI_INIT_SAVE');
+      }
+      this.base = base; this.overrides = loaded.overrides; this.current = next;
+      created = true;
+    });
+    return created;
   }
   private async mutate(operation: () => Promise<void>): Promise<void> {
     if (this.options.busy?.() || this.changing) throw new Error('CODEX_BUSY');
@@ -256,6 +344,8 @@ export class RuntimeConfig {
   status(): string {
     const c = this.current;
     return ['Config source: ' + c.source + ' | Revision: ' + c.revision,
+      ...(c.source === 'setup' ? ['Setup required: an admin must complete /ai init before tasks can run.',
+        'Project default uses the bot startup directory. Configure other folders locally before setup.'] : []),
       'Default project: ' + c.projects.defaultProject + ' | Default profile: ' + c.defaultProfile,
       'Projects: ' + [...c.projects.directories.keys()].map(key => key + (c.projects.enabled?.has(key) ? '' : ' (disabled)')).join(', '),
       'Providers: ' + [...c.installedProviders].map(key => key + (c.providers.enabled.has(key) ? '' : ' (disabled)')).join(', '),

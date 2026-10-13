@@ -4,11 +4,13 @@ Status: Implemented; offline validation covers configuration, selection, session
 
 ## Scope and sources
 
-The first delivery comprises runtime-config and dynamic-selection. Queueing, cancellation of an active worker, durable session/result storage, setup/doctor and publication infrastructure are separate work.
+The first delivery comprises runtime-config and dynamic-selection. Queueing, cancellation of an active worker and durable session/result storage remain separate work. First-install Discord setup is specified in [SPEC-init.md](SPEC-init.md); host diagnostics and release preparation are documented separately.
 
 `ai.config.json` version 1 is the authoritative runtime source when present. It defines local project aliases/directories, provider installations/allowed models/default models, profiles and default project/profile. Relative directories resolve against the config file's directory and are canonicalized. All configured directories must exist, including disabled projects. Provider installation entries support Claude native executable and Gemini absolute JavaScript script; Codex uses the bundled dependency. Sandbox/timeout and Discord credentials, guild, user and admin allowlists remain environment settings.
 
 Without the file, the previous project/provider/model environment settings generate in-memory profiles named after each enabled provider. The default provider determines the default profile. Runtime fields from environment and file are never merged. `.ai-config-overrides.json` applies above either source and survives restart. Invalid references, including stale deletion tombstones, reject reload without replacing the current snapshot.
+
+Authorized admins can use `/ai init [project:ALIAS] [profile:NAME]` to create the first version-1 base file from validated environment settings. Creation uses the same dispatch/config gate, preserves overrides, never replaces an existing/copied file and activates immediately. Host directories and CLI installations remain local; existing copy/edit/reload workflows continue to work.
 
 ## Administrative boundary
 
@@ -22,7 +24,7 @@ Pausing schedules requires a second durable file write. If it fails after config
 
 ## Selection and session identity
 
-All `/ai` session commands accept `profile` or legacy `provider`, exclusively. Omitted options select the shared default profile; no per-user profile preference exists. Explicit provider uses that provider's defaultModel (CLI default when absent). Select Codex with `/ai provider:codex` or a Codex profile; the redundant `/codex` command is removed. Autocomplete reads the current snapshot, authenticates before returning up to 25 entries and returns aliases only. Admin suggestions include disabled projects/providers/profiles. Typed values are independently validated at execution; total project inventory is unlimited by Discord choices.
+All `/ai` session commands accept `profile` or `provider`/`model` options, exclusively. Omitted options select the shared default profile; no per-user profile preference exists. Explicit provider uses that provider's defaultModel (CLI default when absent), unless an allowed model is supplied. Model alone uses the default profile's provider and yields a direct tuple without binding the profile. `/ai models` lists allowed IDs and matching profiles without resolving a project or launching a worker. See [model selection spec](SPEC-model-selection.md) for local CLI discovery. Select Codex with `/ai provider:codex` or a Codex profile; the redundant `/codex` command is removed. Autocomplete reads the current snapshot, authenticates before returning up to 25 entries and returns aliases/model IDs only. Admin suggestions include disabled projects/providers/profiles. Typed values are independently validated at execution; total project inventory is unlimited by Discord choices.
 
 Command option/autocomplete limits follow the [Discord application command documentation](https://github.com/discord/discord-api-docs/blob/main/developers/interactions/application-commands.mdx).
 

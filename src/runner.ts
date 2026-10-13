@@ -1,9 +1,13 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { createInterface } from 'node:readline';
+import { Transform } from 'node:stream';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { validateEffort, type Effort } from './effort.js';
+
+const maxOutputBytes = 2_000_000;
 
 export interface RunOptions {
   workdir: string;
@@ -12,6 +16,7 @@ export interface RunOptions {
   timeoutMs?: number;
   sessionId?: string;
   model?: string;
+  effort?: Effort;
   onSession?: (sessionId: string) => void;
   // Override only in local tests; never expose this setting through chat.
   cliScript?: string;
@@ -45,6 +50,7 @@ export function terminateWorker(child: ChildProcess): void {
 }
 
 export async function runCodex(prompt: string, options: RunOptions): Promise<string> {
+  validateEffort('codex', options.model, options.effort);
   if (!prompt.trim() || prompt.length > 4000) throw new Error('Prompt must contain 1–4000 characters');
   const temporary = await mkdtemp(join(tmpdir(), 'discord-codex-'));
   const outputFile = join(temporary, 'answer.txt');
@@ -60,6 +66,7 @@ export async function runCodex(prompt: string, options: RunOptions): Promise<str
         '--skip-git-repo-check',
         '--json', '--output-last-message', outputFile,
         ...(options.model ? ['--model', options.model] : []),
+        ...(options.effort ? ['--config', 'model_reasoning_effort="' + options.effort + '"'] : []),
         ...(options.sessionId ? ['resume', options.sessionId] : []), '-',
       ], {
         cwd: options.workdir,
@@ -69,8 +76,23 @@ export async function runCodex(prompt: string, options: RunOptions): Promise<str
         detached: process.platform !== 'win32',
         stdio: ['pipe', 'pipe', 'pipe'],
       });
+      let failure: string | undefined;
+      let bytes = 0;
+      // Bound bytes before readline can accumulate an unfinished JSON event.
+      const stdout = new Transform({ transform(chunk: Buffer, _encoding, callback) {
+        bytes += chunk.length;
+        if (bytes > maxOutputBytes) {
+          if (!failure) {
+            failure = 'AI_OUTPUT_LIMIT';
+            events.close();
+            stdout.resume();
+            terminateWorker(child);
+          }
+          callback();
+        } else callback(null, failure ? undefined : chunk);
+      } });
       // Only retain the session ID; other events may contain private project content.
-      const events = createInterface({ input: child.stdout });
+      const events = createInterface({ input: stdout });
       events.on('line', line => {
         try {
           const event = JSON.parse(line);
@@ -80,11 +102,9 @@ export async function runCodex(prompt: string, options: RunOptions): Promise<str
           }
         } catch { /* Ignore non-event CLI output. */ }
       });
-      child.on('close', () => events.close());
-      let timedOut = false;
+      child.on('close', () => { child.stdout.unpipe(stdout); events.close(); stdout.destroy(); });
       const timer = options.timeoutMs && options.timeoutMs > 0 ? setTimeout(() => {
-        timedOut = true;
-        terminateWorker(child);
+        if (!failure) { failure = 'CODEX_TIMEOUT'; terminateWorker(child); }
       }, options.timeoutMs) : undefined;
       child.stderr.on('data', (chunk: Buffer) => {
         stderr = (stderr + chunk.toString('utf8')).slice(-8000);
@@ -94,14 +114,15 @@ export async function runCodex(prompt: string, options: RunOptions): Promise<str
       child.on('error', error => { clearTimeout(timer); reject(error); });
       child.on('close', code => {
         clearTimeout(timer);
-        if (timedOut) reject(new Error('CODEX_TIMEOUT'));
+        if (failure) reject(new Error(failure));
         else if (code !== 0) reject(new Error(`Codex exited with code ${code}. ${stderr}`));
         else resolve();
       });
+      child.stdout.pipe(stdout);
       // Chat text is data on stdin. Characters such as quotes, $, & and backticks are not shell code.
       child.stdin.end(prompt, 'utf8');
     });
-    if ((await stat(outputFile)).size > 1_000_000) throw new Error('Codex response exceeds 1 MB');
+    if ((await stat(outputFile)).size > 1_000_000) throw new Error('AI_OUTPUT_LIMIT');
     const result = (await readFile(outputFile, 'utf8')).trim() || 'Codex finished without a text response.';
     if (sessionId) options.onSession?.(sessionId);
     return result;

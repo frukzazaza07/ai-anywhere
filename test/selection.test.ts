@@ -18,6 +18,60 @@ test('default profile, explicit profile, explicit providers resolve distinct per
   assert.throws(() => selectCommand(f.runtime.value, null, 'writer'), /AI_PROVIDER_DISABLED/);
 });
 
+test('direct model choices use allowed IDs and cannot override a named profile', async t => {
+  const f = await runtimeFixture(t);
+  assert.deepEqual(selectCommand(f.runtime.value, 'codex', null, 'm2'), { provider: 'codex', model: 'm2' });
+  assert.deepEqual(selectCommand(f.runtime.value, null, null, 'm1'), { provider: 'codex', model: 'm1' });
+  assert.deepEqual(selectCommand(f.runtime.value, 'claude', null, 'sonnet'), { provider: 'claude', model: 'sonnet' });
+  assert.throws(() => selectCommand(f.runtime.value, null, 'review', 'm1'), /AI_SELECTION_CONFLICT/);
+  for (const model of ['sonnet', 'missing', '', '--help', '../private', 'm1\nsecret']) {
+    assert.throws(() => selectCommand(f.runtime.value, 'codex', null, model), /AI_MODEL_NOT_ALLOWED/);
+  }
+  await f.runtime.change({ kind: 'defaults', profile: 'writer' });
+  assert.deepEqual(selectCommand(f.runtime.value, null, null, 'sonnet'), { provider: 'claude', model: 'sonnet' });
+  await f.runtime.change({ kind: 'provider', name: 'codex', enabled: false });
+  assert.throws(() => selectCommand(f.runtime.value, 'codex', null, 'm1'), /AI_PROVIDER_DISABLED/);
+});
+
+test('ordinary model autocomplete follows provider/default selection and rejects conflicts and unauthorized requests', async t => {
+  const f = await runtimeFixture(t);
+  const ordinary = { ...auth, adminUsers: new Set<string>() };
+  const suggest = (provider?: string, query = '', profile?: string) =>
+    autocomplete(f.runtime.value, access, ordinary, 'ai', 'model', query, provider, false, profile);
+  assert.deepEqual(suggest().map(choice => choice.value), ['m1', 'm2']);
+  assert.deepEqual(suggest('claude', 'SON').map(choice => choice.value), ['sonnet']);
+  assert.deepEqual(suggest('missing'), []);
+  assert.deepEqual(suggest(undefined, '', 'review'), []);
+  assert.deepEqual(autocomplete(f.runtime.value, { ...access, userId: 'other' }, ordinary, 'ai', 'model', '', 'codex'), []);
+  assert.deepEqual(autocomplete(f.runtime.value, { ...access, guildId: null }, ordinary, 'ai', 'model', '', 'codex'), []);
+  await f.runtime.change({ kind: 'provider', name: 'claude', enabled: false });
+  assert.deepEqual(suggest('claude'), []);
+  f.config.providers.codex.models = Array.from({ length: 40 }, (_, i) => 'm' + i);
+  await f.save(); await f.runtime.reload();
+  assert.equal(suggest('codex').length, 25);
+  assert.deepEqual(suggest('codex', 'm39'), [{ name: 'm39', value: 'm39' }]);
+});
+
+test('direct models share matching profile sessions and reset only their selected model', async t => {
+  const f = await runtimeFixture(t);
+  const calls: AgentRunOptions[] = [];
+  const sessions = new ProjectSessions({ runtime: f.runtime, workdir: f.directory, projects: f.runtime.value.projects,
+    sandbox: 'read-only' }, async (_prompt, options) => {
+    calls.push(options); options.onSession?.(options.sessionId ?? 's' + calls.length); return 'result-' + calls.length;
+  });
+  const first = selectCommand(f.runtime.value, 'codex', null, 'm1');
+  const second = selectCommand(f.runtime.value, 'codex', null, 'm2');
+  await sessions.prompt('user', 'one', first);
+  await sessions.prompt('user', 'two', second);
+  await sessions.prompt('user', 'three', selectCommand(f.runtime.value, null, 'fast'));
+  assert.deepEqual(calls.map(c => [c.model, c.sessionId]), [['m1', undefined], ['m2', undefined], ['m1', 's1']]);
+  sessions.reset('user', second);
+  assert.equal(sessions.result('user', first), 'result-3');
+  assert.notEqual(sessions.result('user', second), 'result-2');
+  await sessions.prompt('user', 'four', second);
+  assert.equal(calls[3]?.sessionId, undefined);
+});
+
 test('autocomplete authenticates guild/user/admin before returning aliases and includes disabled admin entries', async t => {
   const f = await runtimeFixture(t);
   const suggestions = (command: string, option: string, query = '') => autocomplete(f.runtime.value, access, auth, command, option, query);

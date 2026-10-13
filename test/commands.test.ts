@@ -4,19 +4,27 @@ import { commands, commandNames, createCommands } from '../src/commands.js';
 
 test('/ai exposes dynamic provider/profile options and leaves schedule management provider-neutral', () => {
   const definition = commands.find(command => command.name === 'ai')!.toJSON();
-  assert.deepEqual(definition.options?.map(option => option.name), ['run', 'new', 'status', 'clear', 'result', 'schedules', 'cancel', 'projects', 'project']);
+  assert.deepEqual(definition.options?.map(option => option.name), ['run', 'new', 'status', 'clear', 'result', 'models', 'config', 'schedules', 'cancel', 'projects', 'project', 'init']);
   for (const option of definition.options ?? []) {
     assert.equal(option.type, 1);
     if (option.type !== 1) continue;
     const provider = option.options?.find(value => value.name === 'provider');
-    if (['schedules', 'cancel', 'projects', 'project'].includes(option.name)) { assert.equal(provider, undefined); continue; }
+    if (option.name === 'config') {
+      assert.ok(provider && provider.type === 3 && provider.autocomplete);
+      assert.deepEqual(option.options?.map(value => value.name), ['provider', 'model', 'effort']);
+      continue;
+    }
+    if (['schedules', 'cancel', 'projects', 'project', 'init'].includes(option.name)) { assert.equal(provider, undefined); continue; }
     assert.ok(provider && provider.type === 3);
     assert.ok(!provider.required);
     assert.equal(provider.choices, undefined);
     assert.equal(provider.autocomplete, true);
     const profile = option.options?.find(value => value.name === 'profile');
     assert.ok(profile && profile.type === 3 && profile.autocomplete);
-    assert.ok(!option.options?.some(value => ['model', 'path', 'executable', 'flags'].includes(value.name)));
+    assert.ok(!option.options?.some(value => ['path', 'executable', 'flags'].includes(value.name)));
+    const model = option.options?.find(value => value.name === 'model');
+    if (option.name === 'models') assert.equal(model, undefined);
+    else assert.ok(model && model.type === 3 && model.autocomplete && !model.required && model.max_length === 120);
   }
 });
 
@@ -28,7 +36,7 @@ test('command definitions are independent of project inventory and accept more t
     for (const action of actions) {
       if (action.type !== 1) continue;
       const choice = action.options?.find(option => option.name === (action.name === 'project' ? 'name' : 'project'));
-      if (['schedules', 'cancel', 'projects'].includes(action.name)) { assert.equal(choice, undefined); continue; }
+      if (['schedules', 'cancel', 'projects', 'models', 'config'].includes(action.name)) { assert.equal(choice, undefined); continue; }
       assert.ok(choice && choice.type === 3);
       assert.equal(choice.choices, undefined);
       assert.equal(choice.autocomplete, true);
@@ -51,4 +59,11 @@ test('only /ai, /ai-admin and /help are registered and routed', () => {
   assert.deepEqual(commands.map(command => command.name), ['ai', 'ai-admin', 'help']);
   assert.deepEqual([...commandNames], ['ai', 'ai-admin', 'help']);
   assert.equal(commandNames.has('codex'), false);
+});
+
+test('/ai init offers optional project/profile autocomplete without host paths or CLI overrides', () => {
+  const init = commands.find(command => command.name === 'ai')!.toJSON().options!.find(option => option.name === 'init')!;
+  assert.ok(init.type === 1);
+  assert.deepEqual(init.options?.map(option => option.name), ['project', 'profile']);
+  assert.ok(init.options?.every(option => option.type === 3 && option.autocomplete && !option.required));
 });

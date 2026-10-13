@@ -5,14 +5,25 @@ export function taskErrorMessage(error: unknown, provider: ProviderId = 'codex')
   const label = providerLabels[provider];
   if (error instanceof Error && error.message.startsWith('AI_')) {
     switch (error.message) {
+      case 'AI_EFFORT_INVALID': return 'This effort is unavailable for the selected provider/model. Choose from effort autocomplete or /ai config, or use effort:default.';
+      case 'AI_PREFERENCES_INVALID': return 'Unable to load personal AI settings. Check the local preferences file.';
+      case 'AI_PREFERENCES_SAVE': return 'Unable to save your AI settings. Your previous choices remain active.';
+      case 'AI_CONFIG_PICKER_STALE': return 'The configuration changed or the bot restarted. Reopen /ai config to choose current settings.';
+      case 'AI_SETUP_REQUIRED': return 'Setup is required before running AI tasks. Ask an allowed admin to run /ai init in this server.';
+      case 'AI_INIT_STALE': return 'The configuration changed or the bot restarted while this setup form was open. Run /ai init again to use the current choices.';
+      case 'AI_SHUTTING_DOWN': return 'The bot is shutting down. Try again after it restarts.';
       case 'AI_TIMEOUT': return label + ' timeout';
       case 'AI_PROVIDER_DISABLED': return 'This AI provider is not enabled in local configuration.';
       case 'AI_PROJECT_UNAVAILABLE': return 'Project is unavailable. Use /ai project name:… to select an enabled project.';
-      case 'AI_SELECTION_CONFLICT': return 'Choose either provider or profile, using only one.';
+      case 'AI_SELECTION_CONFLICT': return 'Choose a profile OR provider/model options, using only one selection style.';
+      case 'AI_MODEL_NOT_ALLOWED': return 'This model is not allowed for the selected provider. Use /ai models and choose a model from autocomplete.';
       case 'AI_ADMIN_DENIED': return 'คุณไม่มีสิทธิ์จัดการ config ของบอตนี้';
       case 'AI_PROFILE_UNAVAILABLE': return 'Profile is unavailable. Select a current profile.';
       case 'AI_CONFIG_INVALID': return 'Configuration rejected. Check local config and overrides, allowed models and enabled defaults. The previous configuration remains active.';
       case 'AI_CONFIG_SAVE': return 'Unable to save configuration overrides. The previous configuration remains active.';
+      case 'AI_CONFIG_EXISTS': return 'ai.config.json already exists and was preserved. Use /ai-admin reload to validate and load your copied file.';
+      case 'AI_INIT_SAVE': return 'Unable to create ai.config.json. Check local storage permissions or copy ai.config.example.json manually. Your current settings remain active.';
+      case 'AI_INIT_DEFAULT_OVERRIDE': return 'Saved admin overrides select a different default. Use /ai-admin defaults to choose these defaults first, then retry /ai init.';
       case 'AI_CONFIG_JOBS_PENDING': return 'Configuration update blocked: unable to persist paused schedules. Check local storage and retry.';
       case 'AI_CONFIG_JOBS_APPLIED': return 'Configuration was saved and applied. Affected schedules are paused, but saving their state failed. Check local storage and retry before further configuration changes.';
       case 'AI_PROVIDER_UNAVAILABLE': return label + ' CLI is unavailable. Check its local installation and configuration.';

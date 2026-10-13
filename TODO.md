@@ -4,20 +4,20 @@ Target: a self-hosted beta for trusted users, followed by a stable release after
 
 ## Before the first public beta
 
-- [ ] **Required — License:** choose an open-source license, add LICENSE, and set matching package metadata. Confirm ownership and third-party notice requirements before publication.
-- [ ] **High — CI:** run npm ci, npm run build, and npm test on pull requests and the main branch using a supported Node.js version. Cover Windows and each additional OS claimed as supported.
+- [ ] **Required — License:** MIT LICENSE and matching package/lockfile metadata added. Confirm ownership and third-party/native notice requirements before publication; see THIRD_PARTY_NOTICES.md.
+- [x] **High — CI:** workflow runs npm ci, npm run build, npm test and release:check on pull requests and main, on Windows/Linux/macOS with Node 24.17.0 and latest Node 24. Hosted results remain pending.
 - [ ] **High — Live verification:** test a clean installation, command registration and removal of the legacy /codex command, and the documented Codex/Claude/Gemini versions. Verify authorization, private replies, disabled mentions, provider/project isolation, profile changes, scheduling, and restart behavior. Record tested versions/platforms and capture screenshots without private content.
-- [ ] **High — Security policy:** add SECURITY.md with supported versions and a private vulnerability-reporting channel. Explain the trusted-user model, shared CLI accounts, host filesystem access, and provider-specific permission limits.
-- [ ] **High — Publication review:** scan the files intended for release for secrets and private paths, verify credentials/runtime files remain excluded, and review dependency advisories and licenses. Resolve findings or document remaining limitations.
-- [ ] **Medium — Onboarding:** add a concise English quickstart alongside the Thai guide, with a minimal Codex-only setup, supported OS/Node/CLI versions, Discord setup, first-task example, and screenshots.
-- [ ] **Medium — Contributions:** add CONTRIBUTING.md covering local setup, offline tests, coding conventions, bug reports, and pull requests.
-- [ ] **Medium — Beta release notes:** choose a beta version/tag and document installation, upgrades, and known limitations. Make clear that one worker is shared, sessions/results are lost on restart, and /ai cancel cancels schedules rather than active tasks.
+- [ ] **High — Security policy:** SECURITY.md documents support, private GitHub reporting and the trust/permission model. Repository owner must enable and test the private reporting channel before publication.
+- [ ] **High — Publication review:** heuristic source/private-path scan and npm package dry-run passed; credential/runtime exclusions checked; npm audit reported zero advisories. License inventory and native notice limitations recorded. Full history/artifact/ownership/platform notice review remains pending.
+- [ ] **Medium — Onboarding:** English quickstart added with minimal Codex-only setup, platform/version status, Discord setup and first task. Real sanitized screenshots remain pending.
+- [x] **Medium — Contributions:** CONTRIBUTING.md covers setup, offline tests, conventions, bug reports and pull requests.
+- [x] **Medium — Beta release notes:** prepared 1.0.0-beta.1 / proposed v1.0.0-beta.1 tag, with installation/upgrades and known limitations in docs/release-notes.md. No release/tag has been published.
 
 ## Before a stable release
 
-- [ ] **High — Graceful shutdown:** stop accepting tasks and scheduling new work during shutdown; deliberately finish or terminate active worker processes, close Discord, and preserve accurate schedule state. Test shutdown/restart behavior on supported platforms.
+- [ ] **High — Graceful shutdown:** implemented SIGINT/SIGTERM admission closure, active task/reply draining, durable schedule completion and Discord closure. Offline persistence/gate tests pass; real signal/restart/provider tests on supported platforms remain pending.
 - [ ] **High — Validate real usage:** resolve significant defects from beta installation and provider compatibility reports, then repeat the release smoke tests on supported configurations.
-- [ ] **Medium — Setup diagnostics:** add a setup/doctor command that checks configuration, project directories, CLI availability/version, and authentication without exposing credentials or making model requests.
+- [x] **Medium — Setup diagnostics:** npm run doctor checks configuration/directories, enabled CLI versions and auth indicators with bounded shell-free probes, fixed summaries and no model requests. Gemini credential freshness/model access require operator verification.
 
 ## Later improvements
 
@@ -27,4 +27,4 @@ Target: a self-hosted beta for trusted users, followed by a stable release after
 
 ## Current verification baseline
 
-The latest implementation check passed the TypeScript build and all 115 offline tests. Live Discord/provider verification and a full security/dependency audit remain outstanding. Revalidate the release candidate rather than treating this snapshot as release approval.
+On 2026-10-13 the Node 24.21.0 Windows build passed. Standard npm test was blocked by piped child-process EPERM restrictions in this environment; 88 config/session/schedule/registration/help/init tests and 12 doctor/shutdown tests passed via temporary transpilation and in-process execution. The process-dependent tests still need an unrestricted run. npm audit reported zero advisories; heuristic release scanning and package exclusion checks passed. Live Discord/provider verification (including /ai init), hosted CI, screenshots, ownership/private-reporting activation and full publication review remain outstanding. See docs/release-verification.md for evidence and reproducible smoke tests. Revalidate the final candidate before publication.

@@ -2,9 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { readFile, rename, writeFile, mkdir, rm } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { taskErrorMessage } from './results.js';
-import { isModelName, isProviderId, validateSelection, type ProviderConfig, type ProviderSelection } from './providers.js';
+import { cliDefaultModel, isModelName, isProviderId, validateSelection, type ProviderConfig, type ProviderSelection } from './providers.js';
 import { isProjectName, selectProject, type ProjectConfig, type ProjectSelection } from './projects.js';
 import { type RuntimeConfig } from './runtime-config.js';
+import { validateEffort, type Effort } from './effort.js';
 
 export interface Timing { nextRun: number; intervalMs?: number }
 export interface ScheduleInput { at?: string | null; after?: string | null; every?: string | null }
@@ -80,6 +81,7 @@ export interface ScheduledJob extends Timing {
   sandbox: string;
   provider?: ProviderSelection['provider'];
   model?: string;
+  effort?: Effort;
   project?: string;
   profile?: string;
   state: 'pending' | 'running' | 'completed' | 'failed' | 'paused';
@@ -105,6 +107,7 @@ export function scheduleKey(job: Pick<ScheduledJob, 'guildId' | 'channelId' | 'u
 function validJob(value: unknown): value is ScheduledJob {
   if (!value || typeof value !== 'object') return false;
   const job = value as ScheduledJob;
+  try { validateEffort(job.provider ?? 'codex', job.model, job.effort); } catch { return false; }
   return typeof job.id === 'string' && /^[0-9a-f-]{36}$/.test(job.id)
     && [job.guildId, job.channelId, job.userId].every(id => typeof id === 'string' && /^\d{17,20}$/.test(id))
     && typeof job.prompt === 'string' && !!job.prompt.trim() && job.prompt.length <= 4000
@@ -124,6 +127,8 @@ export class CodexScheduler {
   private readonly jobs = new Map<string, ScheduledJob>();
   private writing: Promise<void> = Promise.resolve();
   private ticking = false;
+  private closing = false;
+  private activeTick?: Promise<void>;
   private pauseDirty = false;
   private timer?: ReturnType<typeof setInterval>;
   private readonly now: () => number;
@@ -177,11 +182,12 @@ export class CodexScheduler {
   }
   private pauseReason(job: ScheduledJob): string {
     let reason = '';
-    if (job.guildId !== this.options.guildId || !this.options.allowedUsers.has(job.userId)) reason = 'owner or guild authorization changed';
+    if (this.options.runtime?.value.source === 'setup') reason = 'initial setup required';
+    else if (job.guildId !== this.options.guildId || !this.options.allowedUsers.has(job.userId)) reason = 'owner or guild authorization changed';
     else if (job.workdir !== this.projectFor(job)?.workdir) reason = 'project disabled, removed or directory changed';
     else if (job.sandbox !== this.options.sandbox) reason = 'permissions changed';
     else {
-      const selected = { provider: job.provider ?? 'codex', model: job.model };
+      const selected = { provider: job.provider ?? 'codex', model: job.model, ...(job.effort ? { effort: job.effort } : {}) };
       const p = job.profile ? this.options.runtime?.value.profiles.get(job.profile) : undefined;
       if (job.profile && (!p || p.provider !== selected.provider || p.model !== selected.model)) reason = 'profile deleted or provider/model changed';
       else {
@@ -223,6 +229,8 @@ export class CodexScheduler {
   async add(owner: Pick<ScheduledJob, 'guildId' | 'channelId' | 'userId'>, prompt: string, timing: Timing,
     selection: ProviderSelection = { provider: 'codex', model: this.providers?.models.codex },
     project?: string, profile?: string): Promise<ScheduledJob> {
+    if (this.closing) throw new Error('AI_SHUTTING_DOWN');
+    if (this.options.runtime?.value.source === 'setup') throw new Error('AI_SETUP_REQUIRED');
     const selectedProject = this.projects ? selectProject(this.projects, project) : undefined;
     if (project !== undefined && !selectedProject) throw new Error('AI_PROJECT_UNAVAILABLE');
     const job: ScheduledJob = { ...owner, ...timing, prompt, id: randomUUID(),
@@ -247,18 +255,36 @@ export class CodexScheduler {
     return true;
   }
   start(): void {
+    if (this.closing) return;
     if (!this.timer) this.timer = setInterval(() => {
       void this.tick().catch(() => console.error('Unable to persist or dispatch schedules.'));
     }, 1000);
   }
   stop(): void { clearInterval(this.timer); this.timer = undefined; }
 
-  async tick(): Promise<void> {
-    if (this.ticking || this.options.busy() || this.options.runtime?.updating) return;
+  async shutdown(): Promise<void> {
+    this.closing = true;
+    this.stop();
+    // A dispatch may be saving its claim or finishing a task. Drain it before the final save.
+    // A transient dispatch save failure should not prevent a final durable flush.
+    await this.activeTick?.catch(() => {});
+    await this.save();
+  }
+
+  tick(): Promise<void> {
+    if (this.closing || this.ticking || this.options.busy() || this.options.runtime?.updating) return Promise.resolve();
     this.ticking = true;
+    const tick = this.dispatch();
+    this.activeTick = tick;
+    void tick.then(() => { if (this.activeTick === tick) this.activeTick = undefined; },
+      () => { if (this.activeTick === tick) this.activeTick = undefined; });
+    return tick;
+  }
+
+  private async dispatch(): Promise<void> {
     try {
       const prepare = async () => {
-        if (this.options.busy()) return;
+        if (this.closing || this.options.busy()) return;
         if (this.pauseDirty) await this.refreshConfig();
         const job = [...this.jobs.values()].filter(item => item.state === 'pending' && item.nextRun <= this.now())
           .sort((a, b) => a.nextRun - b.nextRun)[0];
@@ -271,10 +297,10 @@ export class CodexScheduler {
         try { await this.save(); }
         catch (error) { job.state = 'pending'; throw error; }
         if (this.jobs.get(job.id) !== job) return;
-        if (this.options.busy()) { job.state = 'pending'; await this.save(); return; }
+        if (this.closing || this.options.busy()) { job.state = 'pending'; await this.save(); return; }
         // Release the config gate after the session synchronously claims the shared worker.
         const result = (async () => this.options.run(scheduleKey(job), job.prompt,
-          { provider: job.provider ?? 'codex', model: job.model }, job.project))();
+          { provider: job.provider ?? 'codex', model: job.model, ...(job.effort ? { effort: job.effort } : {}) }, job.project))();
         return { job, result };
       };
       const started = this.options.runtime ? await this.options.runtime.exclusive(prepare) : await prepare();
@@ -286,7 +312,8 @@ export class CodexScheduler {
         await started.result;
         outcome = job.profile ? 'Completed. Read the latest result with /ai result profile:' + job.profile
           + (job.project ? ' project:' + job.project : '') + '.'
-          : 'Completed. Read the latest result with /ai result provider:' + (job.provider ?? 'codex') + (job.project ? ' project:' + job.project : '') + '.';
+          : 'Completed. Read the latest result with /ai result provider:' + (job.provider ?? 'codex')
+          + ' model:' + (job.model ?? cliDefaultModel) + (job.effort ? ' effort:' + job.effort : '') + (job.project ? ' project:' + job.project : '') + '.';
         state = 'completed';
       } catch (error) {
         if (error instanceof Error && error.message === 'CODEX_BUSY') {
@@ -321,7 +348,7 @@ export function schedulesText(jobs: ScheduledJob[]): string {
     'State: ' + job.state + ' | Runs: ' + job.runs,
     'Project: ' + (job.project ?? 'legacy directory'),
     ...(job.profile ? ['Profile: ' + job.profile] : []),
-    'Provider: ' + (job.provider ?? 'codex') + ' | Model: ' + (job.model ?? 'CLI default'),
+    'Provider: ' + (job.provider ?? 'codex') + ' | Model: ' + (job.model ?? 'CLI default') + ' | Effort: ' + (job.effort ?? 'CLI default'),
     'Next: <t:' + Math.floor(job.nextRun / 1000) + ':F>' + (job.intervalMs ? ' | Every ' + job.intervalMs / 1000 + 's' : ' | Once'),
     'Prompt: ' + job.prompt,
     ...(job.lastOutcome ? ['Last outcome: ' + job.lastOutcome] : []),

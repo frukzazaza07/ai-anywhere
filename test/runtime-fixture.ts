@@ -9,7 +9,7 @@ export const auth = { guildId: owner.guildId, allowedUsers: new Set([owner.userI
 export const access = { guildId: owner.guildId, userId: owner.userId };
 export async function runtimeFixture(t: TestContext, options: { busy?: () => boolean; write?: (file: string, text: string) => Promise<void> } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'ai-runtime-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  t.after(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 }));
   await mkdir(join(directory, 'api'));
   const file = join(directory, 'ai.config.json');
   const overridesFile = join(directory, 'overrides.json');

@@ -14,6 +14,8 @@ interface ProjectSessionOptions extends AgentRunOptions {
 export class ProjectSessions {
   private readonly sessions = new Map<string, AiSessions>();
   private readonly preferences: ProjectPreferences;
+  private closing = false;
+  private active?: Promise<string>;
 
   constructor(private readonly options: ProjectSessionOptions, private readonly run: typeof runAgent = runAgent) {
     this.preferences = new ProjectPreferences(() => options.runtime?.value.projects ?? options.projects);
@@ -22,10 +24,12 @@ export class ProjectSessions {
   get busy(): boolean { return [...this.sessions.values()].some(session => session.busy); }
 
   currentProject(key: string, override?: string | null): ProjectSelection {
+    if (this.options.runtime?.value.source === 'setup') throw new Error('AI_SETUP_REQUIRED');
     return this.preferences.current(key, override);
   }
 
   switchProject(key: string, name: string): ProjectSelection {
+    if (this.options.runtime?.value.source === 'setup') throw new Error('AI_SETUP_REQUIRED');
     if (this.busy) throw new Error('CODEX_BUSY');
     return this.preferences.switch(key, name);
   }
@@ -65,9 +69,20 @@ export class ProjectSessions {
         .replace(/^Worker: (busy|idle)$/m, 'Worker: ' + (this.busy ? 'busy' : 'idle'));
   }
 
+  async shutdown(): Promise<void> {
+    this.closing = true;
+    await this.active?.catch(() => {});
+  }
+
   async prompt(key: string, prompt: string, selection: ProviderSelection, project?: string): Promise<string> {
+    if (this.closing) throw new Error('AI_SHUTTING_DOWN');
     if (this.busy) throw new Error('CODEX_BUSY');
     // No await before the underlying session claims the worker.
-    return this.session(key, project).prompt(key, prompt, selection);
+    const result = this.session(key, project).prompt(key, prompt, selection);
+    this.active = result;
+    // Register cleanup without creating an unhandled rejection on task failure.
+    void result.then(() => { if (this.active === result) this.active = undefined; },
+      () => { if (this.active === result) this.active = undefined; });
+    return result;
   }
 }

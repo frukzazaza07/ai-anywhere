@@ -11,6 +11,23 @@ import { runtimeFixture, owner, auth } from './runtime-fixture.js';
 const key = scheduleKey(owner);
 const initialTime = 1000000;
 
+test('scheduled direct model choice retains its tuple when the default profile changes', async t => {
+  const f = await runtimeFixture(t);
+  let time = initialTime;
+  const calls: Array<{ provider: string; model?: string }> = [];
+  const scheduler = new CodexScheduler({ file: join(f.directory, 'jobs.json'), workdir: f.directory, sandbox: 'read-only',
+    guildId: owner.guildId, allowedUsers: auth.allowedUsers, runtime: f.runtime, busy: () => false, now: () => time,
+    run: async (_key, _prompt, selection) => { calls.push(selection); return 'done'; } });
+  const selection = selectCommand(f.runtime.value, null, null, 'm1');
+  const job = await scheduler.add(owner, 'review', { nextRun: time + 1 }, selection, 'web', selection.profile);
+  assert.equal(job.profile, undefined);
+  assert.equal(job.model, 'm1');
+  await f.runtime.change({ kind: 'defaults', profile: 'writer' });
+  time++; await scheduler.tick();
+  assert.deepEqual(calls, [{ provider: 'codex', model: 'm1' }]);
+  assert.match(scheduler.list(key)[0]!.lastOutcome!, /\/ai result provider:codex model:m1 project:web/);
+});
+
 test('scheduled profile captures the selected tuple/project and default changes do not redirect it', async t => {
   const f = await runtimeFixture(t);
   let time = initialTime;

@@ -1,0 +1,11 @@
+# Contributing
+
+Use Node.js >=24.17.0 and Git. Fork/clone the repository, run `npm ci`, then `npm run build` and `npm test`. The tests run offline with temporary mock CLIs; Discord tokens and model accounts are unnecessary. Do not register commands or run the live bot for an ordinary code change. A live setup is described in [the English quickstart](docs/quickstart.md).
+
+Edit TypeScript in `src/`, put `node:test` tests in `test/*.test.ts`, and keep session/worker behavior separate from Discord transport. Use two spaces, single quotes, semicolons, strict types and camelCase functions/variables. Use PascalCase types and relative imports ending in `.js` with NodeNext modules. `npm run build` is the static check; there is no formatter or linter.
+
+Changes to sessions, scheduling or providers should cover isolation, shared busy handling, stdin delivery, credential filtering, failure/timeout handling and restart behavior as relevant. Clean up temporary fixtures and restore environment variables. Preserve guild/user authorization, private replies, disabled mentions, local-only path/executable selection and provider permission restrictions. Document public behavior in README/help/specs and use `docs/decisions/` for significant decisions. Read [AGENTS.md](AGENTS.md) for the full repository conventions.
+
+Report ordinary bugs through a repository issue with the commit/version, OS, Node and provider CLI versions, sanitized steps, expected behavior and observed behavior. Include a minimal disposable project when possible. Never upload `.env`, local runtime JSON, raw provider logs or private prompts. Use [the security policy](SECURITY.md) for vulnerabilities.
+
+Keep pull requests focused. Explain the concrete behavior change, tests/checks run, limitations and any required configuration or `npm run register` step. Use concise imperative commit subjects, such as `Add setup diagnostics`. Include sanitized Discord screenshots for visible interaction changes after live verification. Run `npm run build`, `npm test` and `npm run release:check` before submitting. Contributions must be yours to contribute under [MIT](LICENSE); bundled third-party code must retain its required licenses/notices.

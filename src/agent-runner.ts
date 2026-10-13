@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { runCodex, terminateWorker, workerEnvironment, type RunOptions } from './runner.js';
 import { isModelName, isProviderId, type ProviderId } from './providers.js';
+import { validateEffort } from './effort.js';
 
 export interface AgentRunOptions extends RunOptions {
   provider?: ProviderId;
@@ -14,7 +15,7 @@ export interface AgentRunOptions extends RunOptions {
 const sessionPattern = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
 const maxOutputBytes = 2_000_000;
 
-function executeCli(executable: string, args: string[], env: NodeJS.ProcessEnv,
+export function executeCli(executable: string, args: string[], env: NodeJS.ProcessEnv,
   prompt: string, options: RunOptions): Promise<string> {
   return new Promise<string>((resolve, reject) => {
     const child = spawn(executable, args, { cwd: options.workdir, env, shell: false,
@@ -45,7 +46,7 @@ function executeCli(executable: string, args: string[], env: NodeJS.ProcessEnv,
   });
 }
 
-function compatibleVersion(text: string, provider: 'claude' | 'gemini'): boolean {
+export function compatibleVersion(text: string, provider: 'claude' | 'gemini'): boolean {
   const match = /^(\d+)\.(\d+)\.(\d+)(?=\s|$)/.exec(text.trim());
   if (!match) return false;
   const version = match.slice(1, 4).map(Number);
@@ -100,7 +101,8 @@ function parseGemini(text: string): { answer: string; id: string } {
   return { answer, id };
 }
 
-async function geminiSettings(file: string, sandbox: RunOptions['sandbox'], env: NodeJS.ProcessEnv): Promise<void> {
+export async function geminiSettings(file: string, sandbox: RunOptions['sandbox'], env: NodeJS.ProcessEnv,
+  options: RunOptions, metadataOnly = false): Promise<void> {
   // Preserve installed system policy/auth settings before narrowing available tools.
   const systemPath = env.GEMINI_CLI_SYSTEM_SETTINGS_PATH ?? (process.platform === 'win32'
     ? 'C:/ProgramData/gemini-cli/settings.json'
@@ -118,12 +120,24 @@ async function geminiSettings(file: string, sandbox: RunOptions['sandbox'], env:
     ? tools.filter(tool => (existingTools.core as unknown[]).includes(tool)) : tools;
   if (!core.length) throw new Error('AI_PERMISSION_DENIED');
   const existingAdmin = system.admin === undefined ? {} : record(system.admin);
+  const modelConfigs = system.modelConfigs === undefined ? {} : record(system.modelConfigs);
+  let effortOverrides: object[] = [];
+  if (options.effort) {
+    const thinkingConfig = options.model?.startsWith('gemini-2.5-')
+      ? { thinkingBudget: { low: 1024, medium: 8192, high: 24576 }[options.effort as 'low' | 'medium' | 'high'] }
+      : { thinkingLevel: options.effort.toUpperCase() };
+    effortOverrides = [{ match: { model: options.model }, modelConfig: { generateContentConfig: { thinkingConfig } } }];
+  }
   await writeFile(file, JSON.stringify({
     ...system,
+    ...(metadataOnly ? { experimental: { ...(system.experimental === undefined ? {} : record(system.experimental)), autoMemory: false } } : {}),
+    ...(options.effort ? { modelConfigs: { ...modelConfigs,
+      customOverrides: [...(Array.isArray(modelConfigs.customOverrides) ? modelConfigs.customOverrides : []), ...effortOverrides] } } : {}),
     tools: { ...existingTools, core, discoveryCommand: '', callCommand: '' },
     hooksConfig: { enabled: false }, skills: { enabled: false },
     admin: { ...existingAdmin, extensions: { enabled: false }, mcp: { enabled: false }, skills: { enabled: false } },
-    advanced: { ...(system.advanced === undefined ? {} : record(system.advanced)), ignoreLocalEnv: true },
+    advanced: { ...(system.advanced === undefined ? {} : record(system.advanced)), ignoreLocalEnv: true,
+      ...(metadataOnly ? { autoConfigureMemory: false } : {}) },
   }), { mode: 0o600 });
   env.GEMINI_CLI_SYSTEM_DEFAULTS_PATH ??= join(dirname(systemPath), 'system-defaults.json');
   env.GEMINI_CLI_SYSTEM_SETTINGS_PATH = file;
@@ -135,6 +149,7 @@ export async function runAgent(prompt: string, options: AgentRunOptions): Promis
   if (!isProviderId(provider) || (options.model !== undefined && !isModelName(options.model))) {
     throw new Error('AI_INVALID_SELECTION');
   }
+  validateEffort(provider, options.model, options.effort);
   if (!prompt.trim() || prompt.length > 4000) throw new Error('AI_INVALID_PROMPT');
   if (options.sessionId !== undefined && !sessionPattern.test(options.sessionId)) throw new Error('AI_INVALID_SESSION');
   if (provider === 'codex') return runCodex(prompt, options);
@@ -153,10 +168,10 @@ export async function runAgent(prompt: string, options: AgentRunOptions): Promis
       args = ['--print', '--output-format', 'json', '--restricted', '--permission-mode', 'dontAsk',
         '--tools', tools, '--allowedTools', tools, '--disable-slash-commands',
         '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}',
-        '--settings', '{"disableAllHooks":true}', ...common];
+        '--settings', '{"disableAllHooks":true}', ...(options.effort ? ['--effort', options.effort] : []), ...common];
     } else {
       if (!options.geminiScript && !options.cliScript) throw new Error('AI_PROVIDER_UNAVAILABLE');
-      await geminiSettings(join(temporary, 'gemini-settings.json'), options.sandbox, env);
+      await geminiSettings(join(temporary, 'gemini-settings.json'), options.sandbox, env, options);
       executable = process.execPath;
       args = [options.geminiScript!, '--output-format', 'stream-json',
         '--approval-mode', options.sandbox === 'workspace-write' ? 'auto_edit' : 'plan', ...common];

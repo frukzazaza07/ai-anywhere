@@ -13,9 +13,12 @@ export interface CommandHelp {
 
 function sessionHelp(): CommandHelp[] {
   const prefix = '/ai';
-  const selection = ' [project:NAME] [profile:NAME | provider:CLI]';
+  const selection = ' [project:NAME] [profile:NAME | provider:CLI model:MODEL] [effort:LEVEL]';
   const exampleSelection = ' profile:review project:web';
   return [
+    { command: prefix + ' init', description: 'Admin: finish first-install configuration from locally approved projects and providers.',
+      usage: prefix + ' init [project:NAME] [profile:NAME]', example: prefix + ' init project:default profile:codex',
+      notes: 'Requires both admin and ordinary user allowlists. Creates ai.config.json without overwriting an existing file. With no options, opens a form asking for default project/profile aliases; explicit options use autocomplete and save directly. When local project settings are missing or invalid, the bot starts in setup mode with default pointing to its startup folder; tasks remain blocked until init completes. Configure other host paths and CLI logins locally. Rejected while the worker is busy.' },
     { command: prefix + ' run', description: 'Send a task to the local AI worker, or save it to run later.',
       usage: prefix + ' run prompt:TEXT' + selection + ' [at:DATE | after:DURATION | every:DURATION]',
       example: prefix + ' run' + exampleSelection + ' prompt:Review the code and suggest improvements',
@@ -31,7 +34,14 @@ function sessionHelp(): CommandHelp[] {
       notes: 'Does not delete project files, cancel schedules or stop a task. Rejected while the worker is busy.' },
     { command: prefix + ' result', description: 'Retrieve the latest result or sanitized failure for the selected session.',
       usage: prefix + ' result' + selection, example: prefix + ' result' + exampleSelection,
-      notes: 'Use the same project and profile/provider as your task, including when the original Discord reply expires. Results are private and kept in memory until reset/restart or replaced by a later result.' },
+      notes: 'Use the same project and profile/provider/model as your task, including when the original Discord reply expires. Results are private and kept in memory until reset/restart or replaced by a later result.' },
+    { command: prefix + ' models', description: 'List allowed models, the selected default and matching profiles for a provider.',
+      usage: prefix + ' models [provider:CLI | profile:NAME]', example: prefix + ' models provider:codex',
+      notes: 'Omit both options for personal defaults, otherwise the default profile. Loads model choices from the provider CLI without a prompt; while busy, shows saved choices. Autocomplete uses the last loaded catalog. npm run models -- --provider codex --discover inspects the same CLI catalog from a terminal.' },
+    { command: prefix + ' config', description: 'Choose your provider, model and effort from private lists and save them for future prompts.',
+      usage: prefix + ' config [provider:CLI] [model:MODEL] [effort:LEVEL]',
+      example: prefix + ' config provider:codex model:gpt-5.3-codex effort:high',
+      notes: 'Omit options to open dropdowns. Model lists load from the selected provider CLI and combine with local choices. Use Refresh models from CLI to reload after installation/login changes. Lists paginate and choices persist per server/channel/user and provider across restart. Use model:__default__ or effort:default for CLI defaults. Explicit prompt options override saved settings for that request. Named profiles keep their own model. Effort uses CLI capabilities when available. Existing schedules retain their captured settings.' },
     { command: prefix + ' schedules', description: 'List your saved jobs, next run, state and any pause reason in this channel.',
       usage: prefix + ' schedules', example: prefix + ' schedules',
       notes: 'Lists all your projects/providers, including disabled targets. Works while the worker is busy.' },
@@ -76,8 +86,10 @@ export const commandHelp: readonly CommandHelp[] = [
 ];
 
 const selectionGuide = [
-  'Selection: /ai uses the shared default profile when profile/provider is omitted. Choose profile OR provider, never both.',
-  'An explicit provider uses its configured default model; use /ai provider:codex to select Codex. Providers: codex, claude, gemini (only enabled providers can run).',
+  'Use /ai config to save personal provider/model/effort defaults for this server/channel/user. Omitted prompt options use saved choices; explicit options override one request. Model lists are approved locally. CLI defaults: model:__default__, effort:default.',
+  'Selection: /ai uses personal settings when configured, otherwise the shared default profile. Choose profile OR provider, never both.',
+  'An explicit provider uses your saved model for that provider, otherwise its configured default. Add model:MODEL to choose an allowed model for one request. Model alone uses your selected provider, otherwise the default profile\'s provider. Choose a profile OR provider/model options.',
+  'Use /ai models to list choices and model autocomplete to select. Use the same provider/model for status, result, new and clear. Effort applies to each turn and keeps model history. Providers: codex, claude, gemini (only enabled providers can run).',
   'A profile binds provider/model; omitted model means CLI default. Equivalent pairs share conversation history. Use project aliases from autocomplete, never filesystem paths.',
   'Example aliases web/review and model sonnet must be configured before use; replace them with your autocomplete selections.',
 ].join('\n');
@@ -100,7 +112,7 @@ function timingGuide(): string {
 
 export function helpText(topic: HelpTopic = 'all'): string {
   const entries = commandHelp.filter(entry => topic === 'all'
-    || (topic === 'admin' ? entry.command.startsWith('/ai-admin ') : entry.command.startsWith('/' + topic + ' ')));
+    || (topic === 'admin' ? entry.command.startsWith('/ai-admin ') || entry.command === '/ai init' : entry.command.startsWith('/' + topic + ' ')));
   const sections = [
     'Bot command guide — ' + topic,
     'All replies are private with mentions disabled. Access requires the configured server and user allowlist. One worker is shared across all users/projects/providers.',
@@ -124,11 +136,12 @@ export function helpReply(topic: string | null = null) {
     'Bot command help — ' + selected + '. Read descriptions, options and examples in **help.txt**.',
     '',
     '**/ai**: run — send/schedule a task; status — worker/session information; result — retrieve the latest answer; new / clear — reset the selected conversation and result.',
-    '**/ai**: projects — list aliases; project — switch your current project; schedules — list your jobs; cancel — remove a schedule (a running task finishes).',
+    '**/ai**: models — list model choices; projects — list aliases; project — switch your current project; schedules — list your jobs; cancel — remove a schedule (a running task finishes).',
+    '**/ai init** (admins only): finish first-install configuration with optional default project/profile choices; existing files are preserved.',
     '**/ai-admin** (admins only): status — inspect config; reload — reload local files; profile-set / profile-delete — manage profiles; project / provider — enable or disable; defaults — change shared defaults.',
     '',
     'Quick start: /ai run prompt:Review the code → /ai status → /ai result',
-    'Use autocomplete for configured aliases. Choose profile OR provider on /ai; omit both for the default profile. Replies are private.',
+    'Use autocomplete for configured aliases and models. Choose profile OR provider/model on /ai; omit selection for the default profile. Replies are private.',
     'For a focused guide: /help topic:ai | /help topic:admin',
   ].join('\n');
   return { content, files: text.length <= 1900 ? []

@@ -17,7 +17,7 @@ test('completed results remain private and retrievable after the original reply 
   assert.doesNotMatch(sessions.result('alice:other-channel'), /private task result/);
   sessions.reset('alice:channel');
   assert.match(sessions.result('alice:channel'), /No saved result/);
-  assert.match(sessions.result('alice:channel'), /\/ai run provider:codex prompt:/);
+  assert.match(sessions.result('alice:channel'), /\/ai run provider:codex model:__default__ prompt:/);
   assert.match(sessions.status('alice:channel'), /Timeout: disabled/);
 });
 

@@ -1,5 +1,5 @@
 import { runAgent, type AgentRunOptions } from './agent-runner.js';
-import { defaultProviderConfig, providerLabels, selectProvider, validateSelection, type ProviderConfig, type ProviderSelection } from './providers.js';
+import { cliDefaultModel, defaultProviderConfig, providerLabels, selectProvider, validateSelection, type ProviderConfig, type ProviderSelection } from './providers.js';
 import { taskErrorMessage } from './results.js';
 
 interface Session {
@@ -45,7 +45,8 @@ export class AiSessions {
     const identity = this.identity(key, selection);
     const label = providerLabels[identity.selection.provider];
     const command = '/ai';
-    const provider = (profile ? ' profile:' + profile : ' provider:' + identity.selection.provider)
+    const provider = (profile ? ' profile:' + profile : ' provider:' + identity.selection.provider + ' model:' + (identity.selection.model ?? cliDefaultModel))
+      + (identity.selection.effort ? ' effort:' + identity.selection.effort : '')
       + (project ? ' project:' + project : '');
     if (this.active?.key === identity.key) return `${label} is still running. Try ${command} result${provider} again after the task finishes.`;
     return this.results.get(identity.key) ?? `No saved result for this user and channel. Send a task with ${command} run${provider} prompt:….`;
@@ -59,6 +60,7 @@ export class AiSessions {
     return [
       providerLabels[identity.selection.provider] + ' status',
       `Model: ${identity.selection.model ?? 'CLI default'}`,
+      `Effort: ${identity.selection.effort ?? 'CLI default'}`,
       `Worker: ${active ? 'busy' : 'idle'}`,
       ...(active?.key === key ? [`Current task: ${Math.floor((Date.now() - active.started) / 1000)}s elapsed`] : []),
       `Session: ${session?.id ?? 'none (next prompt starts a new session)'}`,

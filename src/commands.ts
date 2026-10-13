@@ -13,6 +13,10 @@ function providerOption(command: SlashCommandSubcommandBuilder): SlashCommandSub
 
 function sessionOptions(command: SlashCommandSubcommandBuilder): SlashCommandSubcommandBuilder {
   return providerOption(command).addStringOption(option => option
+    .setName('model').setDescription('Allowed model (choose provider/model or profile)')
+    .setMaxLength(120).setAutocomplete(true)).addStringOption(option => option
+    .setName('effort').setDescription('Reasoning effort (omitted uses saved config; default uses CLI default)')
+    .setMaxLength(16).setAutocomplete(true)).addStringOption(option => option
     .setName('project').setDescription('Configured project (omitted uses your current project)')
     .setAutocomplete(true));
 }
@@ -39,6 +43,12 @@ function buildCommand() {
       .setName('clear').setDescription('Clear your current AI conversation context')))
     .addSubcommand(command => sessionOptions(command
       .setName('result').setDescription('Retrieve your latest completed AI task result')))
+    .addSubcommand(command => providerOption(command
+      .setName('models').setDescription('List allowed models, selected default and matching profiles')))
+    .addSubcommand(command => command.setName('config').setDescription('Choose and save your provider, model and effort for this channel')
+      .addStringOption(option => option.setName('provider').setDescription('Enabled provider').setAutocomplete(true))
+      .addStringOption(option => option.setName('model').setDescription('Allowed model; __default__ selects CLI default').setMaxLength(120).setAutocomplete(true))
+      .addStringOption(option => option.setName('effort').setDescription('Provider effort; default selects CLI default').setMaxLength(16).setAutocomplete(true)))
     .addSubcommand(command => command
       .setName('schedules').setDescription('List all provider schedules for your current user and channel'))
     .addSubcommand(command => command
@@ -51,7 +61,13 @@ function buildCommand() {
       .setName('project').setDescription('Switch your current project for this user and channel')
       .addStringOption(option => option
         .setName('name').setDescription('Configured project name').setRequired(true)
-        .setAutocomplete(true)));
+        .setAutocomplete(true)))
+    .addSubcommand(command => command
+      .setName('init').setDescription('Admin: finish first-install setup without overwriting existing config')
+      .addStringOption(option => option.setName('project').setDescription('Default project from locally configured folders')
+        .setMaxLength(32).setAutocomplete(true))
+      .addStringOption(option => option.setName('profile').setDescription('Default profile from locally configured providers')
+        .setMaxLength(32).setAutocomplete(true)));
 }
 
 function adminCommand() {
