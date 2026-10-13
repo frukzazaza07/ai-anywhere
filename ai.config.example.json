@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "projects": {
+    "web": { "directory": "C:/projects/my-app", "enabled": true },
+    "notes": { "directory": "C:/projects/my-notes", "enabled": false }
+  },
+  "providers": {
+    "codex": { "enabled": true, "models": [] },
+    "claude": { "enabled": false, "models": ["sonnet"] }
+  },
+  "profiles": {
+    "default": { "provider": "codex" },
+    "review": { "provider": "claude", "model": "sonnet" }
+  },
+  "defaultProject": "web",
+  "defaultProfile": "default"
+}

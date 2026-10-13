@@ -1,0 +1,54 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { commands, commandNames, createCommands } from '../src/commands.js';
+
+test('/ai exposes dynamic provider/profile options and leaves schedule management provider-neutral', () => {
+  const definition = commands.find(command => command.name === 'ai')!.toJSON();
+  assert.deepEqual(definition.options?.map(option => option.name), ['run', 'new', 'status', 'clear', 'result', 'schedules', 'cancel', 'projects', 'project']);
+  for (const option of definition.options ?? []) {
+    assert.equal(option.type, 1);
+    if (option.type !== 1) continue;
+    const provider = option.options?.find(value => value.name === 'provider');
+    if (['schedules', 'cancel', 'projects', 'project'].includes(option.name)) { assert.equal(provider, undefined); continue; }
+    assert.ok(provider && provider.type === 3);
+    assert.ok(!provider.required);
+    assert.equal(provider.choices, undefined);
+    assert.equal(provider.autocomplete, true);
+    const profile = option.options?.find(value => value.name === 'profile');
+    assert.ok(profile && profile.type === 3 && profile.autocomplete);
+    assert.ok(!option.options?.some(value => ['model', 'path', 'executable', 'flags'].includes(value.name)));
+  }
+});
+
+test('command definitions are independent of project inventory and accept more than 25 aliases', () => {
+  assert.deepEqual(createCommands(['web']).map(command => command.toJSON()),
+    createCommands(Array.from({ length: 40 }, (_, i) => 'project-' + i)).map(command => command.toJSON()));
+  for (const command of createCommands().filter(command => command.name !== 'ai-admin')) {
+    const actions = command.toJSON().options ?? [];
+    for (const action of actions) {
+      if (action.type !== 1) continue;
+      const choice = action.options?.find(option => option.name === (action.name === 'project' ? 'name' : 'project'));
+      if (['schedules', 'cancel', 'projects'].includes(action.name)) { assert.equal(choice, undefined); continue; }
+      assert.ok(choice && choice.type === 3);
+      assert.equal(choice.choices, undefined);
+      assert.equal(choice.autocomplete, true);
+      assert.equal(Boolean(choice.required), action.name === 'project');
+    }
+  }
+});
+
+test('admin commands expose only profile, enablement and default changes', () => {
+  const admin = commands.find(command => command.name === 'ai-admin')!.toJSON();
+  assert.deepEqual(admin.options?.map(option => option.name),
+    ['status', 'reload', 'profile-set', 'profile-delete', 'project', 'provider', 'defaults']);
+  for (const action of admin.options ?? []) {
+    if (action.type !== 1) continue;
+    assert.ok(action.options?.every(option => !['directory', 'executable', 'script', 'path'].includes(option.name)) ?? true);
+  }
+});
+
+test('only /ai, /ai-admin and /help are registered and routed', () => {
+  assert.deepEqual(commands.map(command => command.name), ['ai', 'ai-admin', 'help']);
+  assert.deepEqual([...commandNames], ['ai', 'ai-admin', 'help']);
+  assert.equal(commandNames.has('codex'), false);
+});

@@ -1,0 +1,20 @@
+node_modules/
+dist/
+*.log
+
+# Local environment settings and backups; keep the placeholder template.
+.env
+.env.*
+.env~
+!.env.example
+
+# Private runtime state, atomic-write files, and backups.
+ai.config.json
+ai.config.json.*
+ai.config.json~
+.ai-config-overrides.json
+.ai-config-overrides.json.*
+.ai-config-overrides.json~
+.codex-schedules.json
+.codex-schedules.json.*
+.codex-schedules.json~
