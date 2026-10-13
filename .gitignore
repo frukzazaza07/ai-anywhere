@@ -1,5 +1,6 @@
 node_modules/
 dist/
+node-24/
 *.log
 
 # Local environment settings and backups; keep the placeholder template.
