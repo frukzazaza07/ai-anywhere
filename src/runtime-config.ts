@@ -2,8 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { realpathSync, statSync } from 'node:fs';
 import { readFile, writeFile, rename, rm, link } from 'node:fs/promises';
 import { dirname, isAbsolute, resolve } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { providerConfig } from './config.js';
-import { isProjectName, projectConfig, type ProjectConfig } from './projects.js';
+import { isProjectName, prepareProjectDirectory, prepareProjectPath, projectConfig, type ProjectConfig } from './projects.js';
 import { isModelName, isProviderId, providerIds, type ProviderConfig, type ProviderId } from './providers.js';
 import { parseModelCatalog, type CliModel } from './model-catalog.js';
 
@@ -11,6 +12,7 @@ export interface Profile { provider: ProviderId; model?: string }
 interface LocalProject { directory: string; enabled: boolean }
 interface LocalProvider { enabled: boolean; models: string[]; defaultModel?: string; executable?: string; script?: string }
 interface BaseConfig {
+  projectRoots?: Record<string, string>;
   projects: Record<string, LocalProject>;
   providers: Partial<Record<ProviderId, LocalProvider>>;
   profiles: Record<string, Profile>;
@@ -29,12 +31,14 @@ export interface RuntimeSnapshot {
   revision: number;
   source: 'file' | 'environment' | 'setup';
   projects: ProjectConfig;
+  projectRoots: ReadonlyMap<string, string>;
   providers: ProviderConfig;
   installedProviders: ReadonlySet<ProviderId>;
   profiles: ReadonlyMap<string, Profile>;
   defaultProfile: string;
 }
 export type ConfigChange =
+  | { kind: 'add-project'; name: string; root?: string; directory?: string; create: boolean }
   | { kind: 'profile'; name: string; profile: Profile }
   | { kind: 'delete-profile'; name: string }
   | { kind: 'project'; name: string; enabled: boolean }
@@ -56,8 +60,16 @@ function profile(value: unknown): Profile {
   return { provider: p.provider, ...(p.model !== undefined ? { model: p.model as string } : {}) };
 }
 function parseBase(value: unknown, baseDirectory: string): BaseConfig {
-  const data = object(value, ['version', 'projects', 'providers', 'profiles', 'defaultProject', 'defaultProfile']);
+  const data = object(value, ['version', 'projectRoots', 'projects', 'providers', 'profiles', 'defaultProject', 'defaultProfile']);
   if (data.version !== 1) return invalid();
+  const projectRoots: Record<string, string> = Object.create(null);
+  for (const [key, value] of Object.entries(data.projectRoots === undefined ? {} : object(data.projectRoots))) {
+    name(key);
+    if (typeof value !== 'string' || !value.trim()) return invalid();
+    const directory = realpathSync(resolve(baseDirectory, value));
+    if (!statSync(directory).isDirectory()) return invalid();
+    projectRoots[key] = directory;
+  }
   const projects: BaseConfig['projects'] = Object.create(null);
   for (const [key, value] of Object.entries(object(data.projects))) {
     name(key);
@@ -84,7 +96,8 @@ function parseBase(value: unknown, baseDirectory: string): BaseConfig {
   }
   const profiles: BaseConfig['profiles'] = Object.create(null);
   for (const [key, value] of Object.entries(object(data.profiles))) profiles[name(key)] = profile(value);
-  return { projects, providers, profiles, defaultProject: name(data.defaultProject), defaultProfile: name(data.defaultProfile) };
+  return { ...(data.projectRoots !== undefined ? { projectRoots } : {}),
+    projects, providers, profiles, defaultProject: name(data.defaultProject), defaultProfile: name(data.defaultProfile) };
 }
 function parseOverrides(value: unknown): ConfigOverrides {
   const data = object(value, ['projects', 'providers', 'profiles', 'defaultProject', 'defaultProfile', 'catalogs']);
@@ -163,6 +176,7 @@ function snapshot(base: BaseConfig, overrides: ConfigOverrides, revision: number
     if (provider) { models[id] = provider.defaultModel; allowedModels[id] = [...provider.models]; }
   }
   return { revision, source, defaultProfile: merged.defaultProfile,
+    projectRoots: new Map(Object.entries(base.projectRoots ?? {})),
     projects: { directories: new Map(Object.entries(merged.projects).map(([key, p]) => [key, p.directory])),
       enabled: new Set(Object.keys(merged.projects).filter(key => merged.projects[key]!.enabled)), defaultProject: merged.defaultProject },
     providers: { enabled: new Set(providerIds.filter(id => merged.providers[id]?.enabled)),
@@ -171,9 +185,13 @@ function snapshot(base: BaseConfig, overrides: ConfigOverrides, revision: number
     installedProviders: new Set(providerIds.filter(id => merged.providers[id])), profiles: new Map(Object.entries(merged.profiles)) };
 }
 
-export async function atomicConfigWrite(file: string, text: string): Promise<void> {
+export async function atomicConfigWrite(file: string, text: string, beforePublish?: () => Promise<void>): Promise<void> {
   const temporary = file + '.' + randomUUID() + '.tmp';
-  try { await writeFile(temporary, text, { flag: 'wx', mode: 0o600 }); await rename(temporary, file); }
+  try {
+    await writeFile(temporary, text, { flag: 'wx', mode: 0o600 });
+    await beforePublish?.();
+    await rename(temporary, file);
+  }
   finally { await rm(temporary, { force: true }); }
 }
 export async function atomicConfigCreate(file: string, text: string): Promise<void> {
@@ -198,6 +216,7 @@ interface RuntimeOptions {
 export class RuntimeConfig {
   readonly instanceId = randomUUID();
   private base!: BaseConfig;
+  private baseText?: string;
   private overrides: ConfigOverrides = {};
   private current!: RuntimeSnapshot;
   private queue: Promise<unknown> = Promise.resolve();
@@ -212,7 +231,7 @@ export class RuntimeConfig {
     this.queue = next.catch(() => {});
     return next;
   }
-  private async read(): Promise<{ base: BaseConfig; overrides: ConfigOverrides; source: RuntimeSnapshot['source'] }> {
+  private async read(): Promise<{ base: BaseConfig; overrides: ConfigOverrides; source: RuntimeSnapshot['source']; text?: string }> {
     let base: BaseConfig;
     let source: RuntimeSnapshot['source'] = 'file';
     let text: string | undefined;
@@ -235,7 +254,7 @@ export class RuntimeConfig {
     let overrides: ConfigOverrides = {};
     try { overrides = parseOverrides(JSON.parse(await readFile(this.options.overridesFile, 'utf8'))); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
-    return { base, overrides, source };
+    return { base, overrides, source, text };
   }
   async load(): Promise<void> { await this.reload(); }
   /** Trust only catalogs returned by fixed local metadata adapters, never chat-provided IDs. */
@@ -260,7 +279,7 @@ export class RuntimeConfig {
       let next: RuntimeSnapshot;
       try { loaded = await this.read(); next = snapshot(loaded.base, loaded.overrides, (this.current?.revision ?? 0) + 1, loaded.source); }
       catch { throw new Error('AI_CONFIG_INVALID'); }
-      this.base = loaded.base; this.overrides = loaded.overrides; this.current = next;
+      this.base = loaded.base; this.baseText = loaded.text; this.overrides = loaded.overrides; this.current = next;
     });
   }
   async initialize(defaults: InitDefaults = {}): Promise<boolean> {
@@ -284,13 +303,14 @@ export class RuntimeConfig {
         if (error instanceof Error && ['AI_CONFIG_EXISTS', 'AI_INIT_DEFAULT_OVERRIDE'].includes(error.message)) throw error;
         throw new Error('AI_CONFIG_INVALID');
       }
+      const text = JSON.stringify({ version: 1, ...base }, null, 2) + '\n';
       try {
-        await (this.options.create ?? atomicConfigCreate)(this.options.file, JSON.stringify({ version: 1, ...base }, null, 2) + '\n');
+        await (this.options.create ?? atomicConfigCreate)(this.options.file, text);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new Error('AI_CONFIG_EXISTS');
         throw new Error('AI_INIT_SAVE');
       }
-      this.base = base; this.overrides = loaded.overrides; this.current = next;
+      this.base = base; this.baseText = text; this.overrides = loaded.overrides; this.current = next;
       created = true;
     });
     return created;
@@ -312,6 +332,7 @@ export class RuntimeConfig {
     } finally { this.changing = false; }
   }
   async change(change: ConfigChange): Promise<void> {
+    if (change.kind === 'add-project') return this.addProject(change);
     return this.mutate(async () => {
       const overrides = structuredClone(this.overrides);
       try {
@@ -341,12 +362,64 @@ export class RuntimeConfig {
       }
     });
   }
+  private async addProject(change: Extract<ConfigChange, { kind: 'add-project' }>): Promise<void> {
+    return this.mutate(async () => {
+      if (this.current.source !== 'file') throw new Error('AI_PROJECT_SETUP');
+      if (!isProjectName(change.name)) throw new Error('AI_PROJECT_NAME');
+      if (typeof change.create !== 'boolean') throw new Error('AI_CONFIG_INVALID');
+      if (this.current.projects.directories.has(change.name)) throw new Error('AI_PROJECT_EXISTS');
+      if ((change.root === undefined) === (change.directory === undefined)) throw new Error('AI_PROJECT_LOCATION');
+      const root = change.root === undefined ? undefined : this.current.projectRoots.get(change.root);
+      if (change.root !== undefined && (!isProjectName(change.root) || !root)) throw new Error('AI_PROJECT_ROOT');
+      const checkConfig = async () => {
+        try {
+          const loaded = await this.read();
+          if (loaded.text !== this.baseText || !isDeepStrictEqual(loaded.base, this.base)
+            || !isDeepStrictEqual(loaded.overrides, this.overrides)) {
+            throw new Error('AI_PROJECT_CONFIG_CHANGED');
+          }
+        } catch { throw new Error('AI_PROJECT_CONFIG_CHANGED'); }
+      };
+      await checkConfig();
+      const prepared = change.directory !== undefined ? prepareProjectPath(change.directory, change.create)
+        : prepareProjectDirectory(root!, change.name, change.create);
+      try {
+        let directory = prepared.directory;
+        const target = realpathSync.native(directory);
+        // Preserve existing session/schedule identity for alternate Windows path spellings.
+        for (const configured of this.current.projects.directories.values()) {
+          if (realpathSync.native(configured) === target) { directory = configured; break; }
+        }
+        const document = object(JSON.parse(this.baseText!));
+        const projects = object(document.projects);
+        // Define a data property even for valid names such as constructor.
+        Object.defineProperty(projects, change.name, { value: { directory, enabled: true },
+          enumerable: true, configurable: true, writable: true });
+        const base = parseBase(document, dirname(this.options.file));
+        const next = snapshot(base, this.overrides, this.current.revision + 1, 'file');
+        const text = JSON.stringify(document, null, 2) + '\n';
+        const beforePublish = async () => { await checkConfig(); prepared.verify(); };
+        await beforePublish();
+        try { await (this.options.write ?? atomicConfigWrite)(this.options.file, text, beforePublish); }
+        catch (error) {
+          if (error instanceof Error && ['AI_PROJECT_CONFIG_CHANGED', 'AI_PROJECT_DIRECTORY'].includes(error.message)) throw error;
+          throw new Error('AI_PROJECT_SAVE');
+        }
+        this.base = base; this.baseText = text; this.current = next;
+      } catch (error) {
+        prepared.rollback();
+        if (error instanceof Error && error.message.startsWith('AI_')) throw error;
+        throw new Error('AI_CONFIG_INVALID');
+      }
+    });
+  }
   status(): string {
     const c = this.current;
     return ['Config source: ' + c.source + ' | Revision: ' + c.revision,
       ...(c.source === 'setup' ? ['Setup required: an admin must complete /ai init before tasks can run.',
         'Project default uses the bot startup directory. Configure other folders locally before setup.'] : []),
       'Default project: ' + c.projects.defaultProject + ' | Default profile: ' + c.defaultProfile,
+      'Project roots: ' + ([...c.projectRoots.keys()].join(', ') || 'none'),
       'Projects: ' + [...c.projects.directories.keys()].map(key => key + (c.projects.enabled?.has(key) ? '' : ' (disabled)')).join(', '),
       'Providers: ' + [...c.installedProviders].map(key => key + (c.providers.enabled.has(key) ? '' : ' (disabled)')).join(', '),
       'Profiles:', ...[...c.profiles].map(([key, p]) => key + ': ' + p.provider + ' / ' + (p.model ?? 'CLI default'))].join('\n');

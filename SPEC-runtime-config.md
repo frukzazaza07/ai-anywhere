@@ -14,9 +14,25 @@ Authorized admins can use `/ai init [project:ALIAS] [profile:NAME]` to create th
 
 ## Administrative boundary
 
-`/ai-admin status|reload|profile-set|profile-delete|project|provider|defaults` requires the configured guild, ALLOWED_USER_IDS and ADMIN_USER_IDS. Empty admins disable management. Profile replacement can select only a locally installed provider and an allowed model (or omit model for CLI default). Enablement changes reference existing local projects/installations. Paths, executables and allowed-model catalogs can be changed only on disk and reloaded. Defaults must remain usable; deleting a default profile or disabling its provider/default project requires a prior default change.
+`/ai-admin status|reload|profile-set|profile-delete|project|project-add|provider|defaults` requires the configured guild, ALLOWED_USER_IDS and ADMIN_USER_IDS. Empty admins disable management. Profile replacement can select only a locally installed provider and an allowed model (or omit model for CLI default). Enablement changes reference existing local projects/installations. The optional projectRoots catalog and executables can be changed only on disk and reloaded; admins can supply an absolute directory to project-add. Defaults must remain usable; deleting a default profile or disabling its provider/default project requires a prior default change.
 
-Mutations validate the entire merged candidate before an atomic overrides write and snapshot publication. Failed writes retain the current snapshot. Reload validates base plus overrides before replacing either. Discord sees sanitized codes, aliases and models, never raw filesystem errors, paths or credentials. The original local file is never rewritten by Discord.
+Mutations validate the entire merged candidate before an atomic overrides write and snapshot publication. Failed writes retain the current snapshot. Reload validates base plus overrides before replacing either. Discord sees sanitized codes, aliases and models, never raw filesystem errors, paths or credentials.
+
+`project-add` is the exception to override-only persistence: it saves a new project
+entry to `ai.config.json`, preserving unrelated JSON settings and relative entries.
+Optional `projectRoots` maps locally configured aliases to existing canonical roots;
+it is never supplied or changed through chat. The command requires file setup,
+a valid alias and exactly one of an absolute host `directory` or a `root` alias.
+Directory mode needs no preconfigured roots and permits an independent alias;
+root mode names an immediate child using the alias. Omitted `create` registers an
+existing folder; `create:true` creates missing parents and the target exclusively.
+Duplicate aliases, existing-target creation and target links/junctions are rejected.
+Existing ancestors resolve canonically. Base/override edits and directory identity are checked
+again before atomic publication. Detected conflicts require reload and retry.
+Single-instance operation and avoiding concurrent local edits remain operator
+requirements; the filesystem provides no atomic compare-and-swap for outside editors.
+Failed saves roll back only owned empty folders, including created parents, with sanitized cleanup errors.
+Success activates immediately without changing defaults, preferences or schedules.
 
 A shared exclusive gate serializes config changes, manual worker claims, schedule creation and scheduler durable claims. Scheduler releases the gate after the worker has claimed the busy guard so schedule creation remains available during execution. Mutations reject active workers. The handler checks its captured config revision again under the gate after Discord acknowledgement; changed revisions require retrying the command.
 

@@ -1,5 +1,8 @@
 {
   "version": 1,
+  "projectRoots": {
+    "workspace": "C:/projects"
+  },
   "projects": {
     "web": { "directory": "C:/projects/my-app", "enabled": true },
     "notes": { "directory": "C:/projects/my-notes", "enabled": false }

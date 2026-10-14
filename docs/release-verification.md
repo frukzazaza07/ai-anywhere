@@ -58,6 +58,17 @@ Copy this table for each platform/provider tested. Use a disposable project with
 6. **Profiles/config:** change profiles and defaults while idle; verify autocomplete/reload. Changes while busy must fail. Delete/retarget a captured profile or remap its project; its schedules must pause permanently without following a new default. A failed config write must not report success.
    Test `/ai config` with two users/channels: choose provider/model/effort, omit prompt options, override each field for one request and restart to verify personal persistence. Change effort without losing model history. Check pagination, CLI-default choices, empty model lists and stale dropdowns after reload/restart. Confirm revoked models are rejected and saved schedules retain their captured effort. Personal changes may apply during a running task to later prompts.
    First test a clean environment-only installation with `/ai init` as an allowed admin: create a file, select defaults, run the suggested task and restart to check persistence. Reject non-admin/wrong-guild setup and busy setup. Repeat with a manually copied file and verify init preserves it. Credentials and host paths must never appear in its private reply/attachment.
+   Configure a disposable `projectRoots` entry locally and reload. As an admin,
+   use `project-add` with omitted `create` to register an existing child folder,
+   then `create:true` to create an empty new folder. Verify immediate autocomplete,
+   project selection and persistence after restart. Reject non-admin/wrong-guild
+   access, busy changes, invalid names, junctions and duplicate aliases/folders.
+   Confirm defaults, other selections and captured schedules keep their targets.
+   Capture private alias-only success and failure replies.
+   Also test `project-add directory:ABSOLUTE_PATH` without configured roots, with
+   an alias different from the directory name. Verify existing-folder registration,
+   nested parent creation, persistence and private responses. Reject supplying both
+   root/directory, neither location, relative paths and unauthorized path submissions.
 7. **Scheduling:** test one-off/repeating jobs, list/cancel isolation, Bangkok and explicit timezone inputs. Cancel a running repeat and confirm its active task finishes while future runs stop. Results are retrieved in the captured user/channel/project/provider/model tuple.
 8. **Shutdown/restart:** Ctrl+C/SIGTERM while idle, during a manual task, while a schedule claim is being saved, and during one-off/repeating tasks. New tasks/schedules must stop; the worker finishes or reaches its configured deadline, replies settle, saved outcomes are accurate and Discord disconnects. Repeated signals must not duplicate cleanup. Restart and check completed one-offs do not replay, repeats retain their next cadence, and sessions/results are absent. On Windows separately record how the chosen service manager stops the process; forced service stops are not graceful signals.
 9. **Failure/recovery:** test invalid login, missing CLI, timeout and schedule storage write failure. Replies/logs must hide raw provider diagnostics. Shutdown save failure must exit unsuccessfully. In a disposable test only, force-stop an active schedule, restart and confirm one-offs fail without replay and repeats advance to a future interval. Review partial project changes.
@@ -67,6 +78,7 @@ Copy this table for each platform/provider tested. Use a disposable project with
 - [ ] `/help` and first successful read-only `/ai run` with a visible private-reply indicator.
 - [ ] Registered commands after legacy cleanup.
 - [ ] Project/profile selection and busy response.
+- [ ] `project-add` existing-folder and creation replies, immediate selection and denied admin access.
 - [ ] Schedule listing/cancellation and completed-result retrieval.
 - [ ] Restart behavior showing empty in-memory results and retained schedule state.
 

@@ -51,6 +51,19 @@ Only one worker runs across all users, projects and providers. Busy tasks are re
 
 ## Optional projects and providers
 
+To add projects through Discord, finish initial setup. After upgrading,
+build/restart and run `npm run register` once for the updated `project-add`.
+Use `/ai-admin project-add name:my-app directory:D:/new-location/my-app create:true`
+to create a target folder and missing parents, then persist its alias. Omit
+`create` to register an existing directory. The path is absolute on the bot host;
+no root configuration is needed and the alias can differ from the folder name.
+Alternatively configure `"projectRoots": { "workspace": "D:/projects" }` locally,
+reload and use `root:workspace` instead of `directory` to name an immediate child
+folder. Choose exactly one location. Then use `/ai project name:my-app`. Additions
+activate immediately and survive restart. Only approved admins can supply paths;
+worker commands and replies use aliases. Keep credentials outside project folders
+and avoid editing config or moving directories while an addition is saving.
+
 Run `/ai config` to open private provider, model and effort dropdowns. Each selection
 is saved immediately for your server/channel/user, with separate settings for each
 provider, and survives restart. Use the model pagination buttons for longer lists.

@@ -2,12 +2,12 @@ import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type TestContext } from 'node:test';
-import { RuntimeConfig } from '../src/runtime-config.js';
+import { RuntimeConfig, atomicConfigWrite } from '../src/runtime-config.js';
 
 export const owner = { guildId: '111111111111111111', channelId: '222222222222222222', userId: '333333333333333333' };
 export const auth = { guildId: owner.guildId, allowedUsers: new Set([owner.userId]), adminUsers: new Set([owner.userId]) };
 export const access = { guildId: owner.guildId, userId: owner.userId };
-export async function runtimeFixture(t: TestContext, options: { busy?: () => boolean; write?: (file: string, text: string) => Promise<void> } = {}) {
+export async function runtimeFixture(t: TestContext, options: { busy?: () => boolean; write?: typeof atomicConfigWrite } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'ai-runtime-'));
   t.after(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 }));
   await mkdir(join(directory, 'api'));

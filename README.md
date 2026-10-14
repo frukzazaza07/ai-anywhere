@@ -110,7 +110,41 @@ Manual setup: copy [ai.config.example.json](ai.config.example.json) to `ai.confi
 
 `ai.config.json` replaces `.env` projects/providers/models/defaults. Legacy `.env` setups still work. Restart after changing credentials, access, sandbox, or timeout.
 
-Admin commands: `/ai-admin status`, `reload`, `profile-set`, `profile-delete`, `project`, `provider`, `defaults`. Configure new paths locally; change defaults before disabling their targets. Invalid reloads preserve working settings. Details: `/help topic:admin`.
+Admin commands: `/ai-admin status`, `reload`, `profile-set`, `profile-delete`, `project`, `project-add`, `provider`, `defaults`. Admins can supply an absolute host directory when adding projects; executable settings remain local. Change defaults before disabling their targets. Invalid reloads preserve working settings. Details: `/help topic:admin`.
+
+To add projects from Discord, finish `/ai init`. After upgrading, build, restart
+the bot and run `npm run register` once to expose the updated command. An allowed
+admin can supply an absolute directory on the bot host:
+
+```text
+/ai-admin project-add name:my-app directory:D:/new-location/my-app create:true
+/ai project name:my-app
+```
+
+This creates the target folder and any missing parent folders, saves the alias to
+`ai.config.json` and activates it immediately. No project root configuration is
+required. Omit `create` (or use `create:false`) to register an existing directory;
+the alias may differ from its folder name. Use an absolute path for the host OS
+(including a drive on Windows), not a path on your Discord device. Filesystem
+permissions of the bot's OS account still apply. Replies show aliases only.
+
+For the optional root-alias workflow, configure an existing folder locally:
+
+```json
+"projectRoots": { "workspace": "D:/projects" }
+```
+
+Run `/ai-admin reload`, then `/ai-admin project-add name:my-app root:workspace
+create:true`. With `root`, the alias also names an immediate child folder. Choose
+exactly one of `root` or `directory`. Future additions need no restart or
+registration. Defaults and existing schedules keep their targets. Alias rules
+remain as above; target symbolic links/junctions and duplicate aliases are rejected.
+Existing parent directories are canonicalized, and `create:true` never replaces
+an existing target. `/ai` worker commands continue to accept project aliases only.
+Keep credentials and runtime settings outside project folders. Avoid local config
+edits and directory moves while an addition saves; detected conflicts require
+reload and retry. Failed saves remove only owned, still-empty new directories,
+including newly created parents. Inspect any cleanup failure locally before retrying.
 
 ### Optional providers
 

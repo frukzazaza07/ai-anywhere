@@ -164,6 +164,9 @@ client.on(Events.InteractionCreate, interaction => {
             change = { kind: 'profile', name: interaction.options.getString('name', true),
               profile: { provider, model: interaction.options.getString('model') ?? undefined } };
           } else if (action === 'profile-delete') change = { kind: 'delete-profile', name: interaction.options.getString('name', true) };
+          else if (action === 'project-add') change = { kind: 'add-project', name: interaction.options.getString('name', true),
+            root: interaction.options.getString('root') ?? undefined, directory: interaction.options.getString('directory') ?? undefined,
+            create: interaction.options.getBoolean('create') ?? false };
           else if (action === 'project' || action === 'provider') change = { kind: action,
             name: interaction.options.getString(action, true), enabled: interaction.options.getBoolean('enabled', true) };
           else change = { kind: 'defaults', project: interaction.options.getString('project') ?? undefined,

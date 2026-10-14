@@ -45,14 +45,26 @@ test('command definitions are independent of project inventory and accept more t
   }
 });
 
-test('admin commands expose only profile, enablement and default changes', () => {
+test('only admin project-add accepts a directory; executable overrides remain local', () => {
   const admin = commands.find(command => command.name === 'ai-admin')!.toJSON();
   assert.deepEqual(admin.options?.map(option => option.name),
-    ['status', 'reload', 'profile-set', 'profile-delete', 'project', 'provider', 'defaults']);
+    ['status', 'reload', 'profile-set', 'profile-delete', 'project', 'project-add', 'provider', 'defaults']);
   for (const action of admin.options ?? []) {
     if (action.type !== 1) continue;
-    assert.ok(action.options?.every(option => !['directory', 'executable', 'script', 'path'].includes(option.name)) ?? true);
+    assert.ok(action.options?.every(option => !['executable', 'script', 'path'].includes(option.name)
+      && (option.name !== 'directory' || action.name === 'project-add')) ?? true);
   }
+  const add = admin.options!.find(action => action.name === 'project-add')!;
+  assert.ok(add.type === 1);
+  assert.deepEqual(add.options?.map(option => option.name), ['name', 'root', 'directory', 'create']);
+  const name = add.options![0]!;
+  assert.ok(name.type === 3 && name.required && name.max_length === 32 && !name.autocomplete);
+  const root = add.options![1]!;
+  assert.ok(root.type === 3 && !root.required && root.autocomplete);
+  const directory = add.options![2]!;
+  assert.ok(directory.type === 3 && !directory.required && !directory.autocomplete && directory.max_length === 1024);
+  const create = add.options![3]!;
+  assert.ok(create.type === 5 && !create.required);
 });
 
 test('only /ai, /ai-admin and /help are registered and routed', () => {

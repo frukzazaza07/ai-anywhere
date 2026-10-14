@@ -40,6 +40,7 @@ export function autocomplete(config: RuntimeSnapshot, access: Access, auth: Acce
   const admin = command === 'ai-admin';
   if (!authorized(access, auth, admin || adminOnly)) return [];
   let values: string[] = [];
+  if (option === 'root' && admin) values = [...config.projectRoots.keys()];
   if (option === 'effort') {
     try {
       const selected = selectCommand(config, provider, profile, model);

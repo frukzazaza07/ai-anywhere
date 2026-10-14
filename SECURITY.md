@@ -18,7 +18,19 @@ Workers inherit the host environment with Discord settings and user allowlists r
 
 Codex uses `read-only` or `workspace-write` sandboxing; Codex can use shell tools subject to its own sandbox and host configuration. The bot never enables permission bypass. Claude uses restricted file tools with `dontAsk`, disabled hooks and empty MCP configuration. Gemini uses a narrowed file tool list and disables hooks, extensions, skills, custom tools and MCP. These provider limits depend on compatible CLI versions and are not a universal sandbox against malicious code, prompt injection or host configuration.
 
-Worker paths and executable overrides are local settings; Discord selects configured aliases only. Authorization is checked for guild/user and separately for admin operations. Replies are ephemeral with mentions disabled. CLI launches use no shell and receive chat prompts through stdin.
+Worker commands select configured aliases only; executable overrides remain local settings. Authorization is checked for guild/user and separately for admin operations. Replies are ephemeral with mentions disabled. CLI launches use no shell and receive chat prompts through stdin.
+
+By an explicit operator-approved design exception, admins may supply an absolute
+host directory to `/ai-admin project-add` without a preconfigured root. This lets
+trusted admins select any folder accessible to the bot's OS account. An optional
+`root` alias still restricts additions to immediate child folders of locally
+configured `projectRoots`. Exactly one location is required. The command rejects
+target symbolic links/junctions and never replaces an existing alias or directory;
+existing parents resolve to canonical paths. Saved settings contain the canonical
+path, while replies expose aliases only. Failed saves remove only owned empty new
+folders, including created parents; cleanup never recursively deletes project
+files. Keep admins and config trusted, run one bot instance, and avoid concurrent
+config edits or directory moves during additions. This is not an OS sandbox.
 
 Claude/Gemini task execution and model discovery check supported CLI versions before starting their task or metadata protocols. Discovery has a shared deadline for the version probe and metadata session. Codex stdout is capped at 2 MB before JSON line buffering, and its final answer file is capped at 1 MB; exceeding either limit terminates or rejects the task with a sanitized error.
 

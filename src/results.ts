@@ -10,6 +10,17 @@ export function taskErrorMessage(error: unknown, provider: ProviderId = 'codex')
       case 'AI_PREFERENCES_SAVE': return 'Unable to save your AI settings. Your previous choices remain active.';
       case 'AI_CONFIG_PICKER_STALE': return 'The configuration changed or the bot restarted. Reopen /ai config to choose current settings.';
       case 'AI_SETUP_REQUIRED': return 'Setup is required before running AI tasks. Ask an allowed admin to run /ai init in this server.';
+      case 'AI_PROJECT_SETUP': return 'Run /ai init to create ai.config.json before adding projects.';
+      case 'AI_PROJECT_LOCATION': return 'Choose exactly one location: directory for an absolute path on the bot host, or root for a configured root alias.';
+      case 'AI_PROJECT_PATH': return 'Use an absolute directory path on the bot host, including its drive on Windows. Relative and empty paths are rejected.';
+      case 'AI_PROJECT_NAME': return 'Use a project name starting with a lowercase letter, followed by lowercase letters, digits, underscores or hyphens (maximum 32 characters).';
+      case 'AI_PROJECT_ROOT': return 'Choose a root alias from autocomplete. An admin must configure projectRoots in ai.config.json locally and run /ai-admin reload first.';
+      case 'AI_PROJECT_EXISTS': return 'This project alias already exists. Choose a new alias; existing projects cannot be replaced with project-add.';
+      case 'AI_PROJECT_DIRECTORY_EXISTS': return 'This folder already exists. Omit create or use create:false to register it, or choose another name.';
+      case 'AI_PROJECT_DIRECTORY': return 'Project folder rejected. Check host filesystem permissions and use a directory without a symbolic link or junction at the target. With root, use an immediate child folder. To create missing folders, use create:true.';
+      case 'AI_PROJECT_CONFIG_CHANGED': return 'Local configuration changed. Run /ai-admin reload and retry the project addition.';
+      case 'AI_PROJECT_SAVE': return 'Unable to save the new project to ai.config.json. The previous configuration remains active. Check local storage permissions.';
+      case 'AI_PROJECT_CLEANUP': return 'Project addition failed and its new folder could not be safely cleaned up. The previous configuration remains active. Check local storage before retrying.';
       case 'AI_INIT_STALE': return 'The configuration changed or the bot restarted while this setup form was open. Run /ai init again to use the current choices.';
       case 'AI_SHUTTING_DOWN': return 'The bot is shutting down. Try again after it restarts.';
       case 'AI_TIMEOUT': return label + ' timeout';

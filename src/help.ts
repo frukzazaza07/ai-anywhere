@@ -77,6 +77,10 @@ export const commandHelp: readonly CommandHelp[] = [
   { command: '/ai-admin project', description: 'Enable or disable an existing locally configured project alias.',
     usage: '/ai-admin project project:PROJECT enabled:true|false', example: '/ai-admin project project:web enabled:false',
     notes: 'Change the default project before disabling it. Disabled selections require choosing another project; affected jobs pause.' },
+  { command: '/ai-admin project-add', description: 'Register or create a project folder using an absolute host directory or a configured root alias.',
+    usage: '/ai-admin project-add name:PROJECT [directory:ABSOLUTE_PATH | root:ROOT] [create:true|false]',
+    example: '/ai-admin project-add name:my-app directory:ABSOLUTE_PATH create:true',
+    notes: 'Choose exactly one of directory or root. directory accepts an absolute path on the bot host, with no preconfigured root needed; the alias can differ from the folder name. Root aliases come from optional local projectRoots, with name also naming an immediate child folder. Alias rules: lowercase letter first; lowercase letters, digits, underscores and hyphens; maximum 32 characters. Omit create to register an existing folder; create:true creates missing parent folders and the target, and never replaces an existing target. Target symbolic links/junctions are rejected; existing parent paths are canonicalized. Requires completed /ai init. Saves to ai.config.json and activates immediately; defaults, current selections and existing schedules stay unchanged. Use /ai project name:PROJECT afterward. Rejected while busy. Replies expose aliases only.' },
   { command: '/ai-admin provider', description: 'Enable or disable a locally configured CLI provider.',
     usage: '/ai-admin provider provider:CLI enabled:true|false', example: '/ai-admin provider provider:claude enabled:true',
     notes: 'Change the default profile before disabling its provider. Affected jobs pause; restoring a target does not automatically resume paused jobs.' },
@@ -121,7 +125,7 @@ export function helpText(topic: HelpTopic = 'all'): string {
   if (topic !== 'admin') sections.push(selectionGuide);
   if (topic === 'all' || topic === 'admin') sections.push(
     'Admin commands require membership in both ADMIN_USER_IDS and the ordinary user allowlist. Blank ADMIN_USER_IDS disables management. All admin changes except status are rejected while a worker runs.',
-    'Admin edits persist as local overrides. Adding project aliases/directories, installing executables or changing allowed model catalogs requires editing local config and reload.');
+    'Admin edits persist as local overrides, except project-add which saves the new alias to ai.config.json. project-add accepts an absolute host directory or an optional locally configured root alias. Executables and the optional projectRoots catalog remain local settings.');
   sections.push(...entries.map(entry => [entry.command, entry.description, 'Usage: ' + entry.usage,
     'Example: ' + entry.example, ...(entry.notes ? [entry.notes] : [])].join('\n')));
   if (topic === 'all' || topic === 'ai') sections.push(timingGuide());
@@ -138,7 +142,7 @@ export function helpReply(topic: string | null = null) {
     '**/ai**: run — send/schedule a task; status — worker/session information; result — retrieve the latest answer; new / clear — reset the selected conversation and result.',
     '**/ai**: models — list model choices; projects — list aliases; project — switch your current project; schedules — list your jobs; cancel — remove a schedule (a running task finishes).',
     '**/ai init** (admins only): finish first-install configuration with optional default project/profile choices; existing files are preserved.',
-    '**/ai-admin** (admins only): status — inspect config; reload — reload local files; profile-set / profile-delete — manage profiles; project / provider — enable or disable; defaults — change shared defaults.',
+    '**/ai-admin** (admins only): status — inspect config; reload — reload local files; profile-set / profile-delete — manage profiles; project / provider — enable or disable; project-add — register/create a project folder; defaults — change shared defaults.',
     '',
     'Quick start: /ai run prompt:Review the code → /ai status → /ai result',
     'Use autocomplete for configured aliases and models. Choose profile OR provider/model on /ai; omit selection for the default profile. Replies are private.',
