@@ -94,4 +94,4 @@ Schedules capture the selected directory/provider/model/profile. Try `/ai run pr
 
 ## Screenshots and release status
 
-Live screenshots have not been captured. The [smoke-test record](release-verification.md) specifies the private-reply, registration, profile, schedule and restart captures required before publication. Add screenshots only from a disposable test project after removing account IDs, tokens, paths and private content. [Beta notes](release-notes.md), [contributing](../CONTRIBUTING.md), and [the Thai guide](../README.md) provide the remaining details.
+Live screenshots have not been captured. The [smoke-test record](release-verification.md) specifies the private-reply, registration, profile, schedule and restart captures required before publication. Add screenshots only from a disposable test project after removing account IDs, tokens, paths and private content. [Beta notes](release-notes.md), [contributing](../CONTRIBUTING.md), and [the README](../README.md) provide the remaining details.

@@ -165,16 +165,15 @@ export class CodexScheduler {
   }
 
   private projectFor(job: ScheduledJob): ProjectSelection | undefined {
-    if (!this.projects) return job.project === undefined
-      ? { project: 'default', workdir: this.options.workdir } : undefined;
-    if (job.project !== undefined) {
-      try { return selectProject(this.projects, job.project); }
-      catch { return undefined; }
-    }
     const config = this.projects;
-    if (config.directories.get(config.defaultProject) === job.workdir) return selectProject(config);
-    const alias = [...config.directories].find(([, directory]) => directory === job.workdir)?.[0];
-    return alias ? selectProject(config, alias) : undefined;
+    if (!config) return job.project === undefined
+      ? { project: 'default', workdir: this.options.workdir } : undefined;
+    try {
+      if (job.project !== undefined) return selectProject(config, job.project);
+      if (config.directories.get(config.defaultProject) === job.workdir) return selectProject(config);
+      const alias = [...config.directories].find(([, directory]) => directory === job.workdir)?.[0];
+      return alias ? selectProject(config, alias) : undefined;
+    } catch { return undefined; }
   }
 
   private authorized(job: ScheduledJob): boolean {

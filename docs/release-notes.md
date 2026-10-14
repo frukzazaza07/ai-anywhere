@@ -4,7 +4,7 @@ Proposed Git tag: `v1.0.0-beta.1`. This is preparation for a source-distributed,
 
 ## Install
 
-Follow [the English quickstart](quickstart.md) or [Thai guide](../README.md). Use Node.js >=24.17.0, `npm ci`, local CLI login, `npm run doctor`, `npm run build`, `npm test`, `npm run register` and `npm start`. Source archives require compilation before starting; `dist/` and dependencies are not distributed. Copy configuration templates locally rather than including credentials in the release.
+Follow [the English quickstart](quickstart.md) or [README](../README.md). Use Node.js >=24.17.0, `npm ci`, local CLI login, `npm run doctor`, `npm run build`, `npm test`, `npm run register` and `npm start`. Source archives require compilation before starting; `dist/` and dependencies are not distributed. Copy configuration templates locally rather than including credentials in the release.
 
 ## Upgrade
 
@@ -26,6 +26,7 @@ Private `/ai`, `/ai-admin` and `/help` commands, admin-only `/ai init` first-ins
 
 ## Fixes and security
 
+- Restarting with saved project/default-profile overrides pauses older schedules pointing at disabled projects instead of failing startup. Overrides remain saved, and affected jobs retain their original targets until cancelled and recreated.
 - Changing a personal model clears inherited effort to CLI default when the new model does not support it. Explicit incompatible effort is rejected before saving.
 - Refreshing or paging through `/ai config` preserves the default-profile model for users without saved preferences, keeping displayed effort choices consistent with subsequent tasks.
 - Claude/Gemini model discovery checks the same supported versions as task execution: stable Claude Code >=2.1.248 and Gemini CLI >=0.63.0. The version probe has bounded output and shares a deadline with metadata initialization.

@@ -25,6 +25,7 @@
 - Restricted file tool execution, local CLI version checks and bounded structured output handling for additional providers.
 
 ### Fixed
+- Restarting after saved project/default-profile overrides pauses legacy schedules whose captured project is disabled instead of failing startup. Saved overrides and original job targets are preserved.
 - Release scanning rejects symbolic links and directory junctions before reading candidate or package metadata files, enforces repository containment and private-file exclusions, and checks the opened file's identity.
 - Claude/Gemini model discovery now checks supported CLI versions before protocol initialization, with bounded version output and one timeout budget across the version probe and metadata session.
 - Codex stdout is limited to 2 MB before JSON line buffering. Output overflow stops the worker, cleans temporary output and returns a sanitized error while preserving the previous successful session.

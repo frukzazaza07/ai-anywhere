@@ -36,6 +36,28 @@ test('file runtime is authoritative over incompatible legacy env and canonicaliz
   assert.equal(selectCommand(runtime.value, 'codex').model, 'm1');
 });
 
+test('admin project and profile overrides with a discovered catalog survive each restart', async t => {
+  const f = await runtimeFixture(t);
+  await f.runtime.updateModelCatalog('codex', [{ model: 'discovered', efforts: ['low', 'high'] }]);
+  let runtime = f.runtime;
+  for (const change of [
+    { kind: 'defaults', project: 'api' },
+    { kind: 'profile', name: 'custom', profile: { provider: 'codex', model: 'discovered' } },
+    { kind: 'defaults', profile: 'custom' },
+    { kind: 'project', name: 'web', enabled: false },
+    { kind: 'profile', name: 'custom', profile: { provider: 'codex' } },
+    { kind: 'delete-profile', name: 'review' },
+  ] as const) {
+    await manageConfig(runtime, access, auth, change);
+    const saved = await readFile(f.overridesFile, 'utf8');
+    const expected = runtime.value;
+    runtime = new RuntimeConfig(f.runtimeOptions);
+    await runtime.load();
+    assert.deepEqual({ ...runtime.value, revision: 0 }, { ...expected, revision: 0 });
+    assert.equal(await readFile(f.overridesFile, 'utf8'), saved);
+  }
+});
+
 test('overrides persist profile edits, deletions, enablement and defaults without modifying the base file', async t => {
   const f = await runtimeFixture(t);
   const original = await readFile(f.file, 'utf8');

@@ -135,6 +135,38 @@ test('scheduler dispatch claims the shared worker under the config gate while sc
   assert.equal(scheduler.list(key)[0]?.state, 'completed');
 });
 
+test('restart with project and profile overrides pauses disabled legacy targets without losing saved settings', async t => {
+  const f = await runtimeFixture(t);
+  let calls = 0;
+  const file = join(f.directory, 'legacy-jobs.json');
+  const original = new CodexScheduler({ file, workdir: f.directory, sandbox: 'read-only',
+    guildId: owner.guildId, allowedUsers: auth.allowedUsers, busy: () => false, now: () => initialTime,
+    providers: f.runtime.value.providers, run: async () => { calls++; return 'done'; } });
+  const job = await original.add(owner, 'legacy task', { nextRun: initialTime + 1000 }, { provider: 'codex', model: 'm2' });
+  await f.runtime.change({ kind: 'defaults', project: 'api', profile: 'writer' });
+  await f.runtime.change({ kind: 'project', name: 'web', enabled: false });
+  const saved = await readFile(f.overridesFile, 'utf8');
+  const runtime = new RuntimeConfig(f.runtimeOptions);
+  await runtime.load();
+  const restarted = new CodexScheduler({ file, runtime, workdir: join(f.directory, 'api'), sandbox: 'read-only',
+    guildId: owner.guildId, allowedUsers: auth.allowedUsers, busy: () => false, now: () => initialTime + 2000,
+    run: async () => { calls++; return 'done'; } });
+  await restarted.load();
+  assert.equal(restarted.list(key)[0]?.state, 'paused');
+  assert.equal(restarted.list(key)[0]?.workdir, job.workdir);
+  assert.equal(restarted.list(key)[0]?.project, undefined);
+  await restarted.tick();
+  assert.equal(calls, 0);
+  assert.equal(runtime.value.projects.defaultProject, 'api');
+  assert.equal(runtime.value.defaultProfile, 'writer');
+  assert.equal(await readFile(f.overridesFile, 'utf8'), saved);
+  assert.match(schedulesText(restarted.list(key)), /Paused: project disabled/);
+  await runtime.change({ kind: 'project', name: 'web', enabled: true });
+  await restarted.tick();
+  assert.equal(restarted.list(key)[0]?.state, 'paused');
+  assert.equal(calls, 0);
+});
+
 test('configuration writes serialize with scheduler dispatch so it cannot run a superseded profile', async t => {
   let entered!: () => void;
   let release!: () => void;
