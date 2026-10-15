@@ -33,6 +33,7 @@ export function taskErrorMessage(error: unknown, provider: ProviderId = 'codex')
       case 'AI_PROFILE_EXISTS': return 'This profile already exists. Choose a new name or use /ai-admin profile-set to replace it.';
       case 'AI_PROJECT_UNAVAILABLE': return 'Project is unavailable. Use /ai project name:… to select an enabled project.';
       case 'AI_SELECTION_CONFLICT': return 'Choose a profile OR provider/model options, using only one selection style.';
+      case 'AI_PROFILE_PROJECT_CONFLICT': return 'This profile is bound to a different project. Use the profile alone, or choose provider/model/project explicitly.';
       case 'AI_MODEL_NOT_ALLOWED': return 'This model is not allowed for the selected provider. Use /ai models and choose a model from autocomplete.';
       case 'AI_ADMIN_DENIED': return 'คุณไม่มีสิทธิ์จัดการ config ของบอตนี้';
       case 'AI_PROFILE_UNAVAILABLE': return 'Profile is unavailable. Select a current profile.';

@@ -3,6 +3,7 @@
 ## 1.0.0-beta.1 (release candidate; not published)
 
 ### Added
+- Project/provider/model profiles let `/ai run`, `/ai status`, `/ai result` and resets select a target with only `profile`. Admin profile creation/replacement now requires a project alias. Direct provider/model/project options and legacy unbound profiles remain supported; changed project bindings pause captured schedules. Build, restart and re-register commands after upgrading.
 - Admin-only `/ai-admin provider-add` registers supported local CLIs and approves optional model IDs directly from Discord; `/ai-admin profile-add` creates profiles without replacing existing names. Changes activate immediately and survive restart. Installation paths and logins remain host settings. Build, restart and re-register commands once after upgrading.
 - Admin-only `/ai-admin project-add` accepts an absolute host `directory` or an optional locally configured `root` alias. Register an existing folder or use `create:true` to create the target and missing parents. Additions save to `ai.config.json`, activate immediately and survive restart, preserving defaults, overrides and scheduled targets. Re-register commands and restart after upgrading.
 - Private `/ai config` dropdowns and direct options save personal provider/model/effort defaults per guild/channel/user, with model pagination and durable preferences. Omitted prompt options use saved choices; explicit prompt options override one request. Effort reaches each provider adapter and is captured by schedules. Re-register commands and restart after upgrading.

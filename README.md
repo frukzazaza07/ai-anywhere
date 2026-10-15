@@ -88,7 +88,15 @@ Type `/` and select options from autocomplete.
 | `/ai new` / `/ai clear` | Reset the selected conversation and result |
 | `/ai schedules` / `/ai cancel id:…` | List / remove schedules |
 
-Add `project:…` and either `profile:…` or `provider:… model:…`. A **project** names a folder; a **profile** presets a provider/model. Reuse these selections for status, results, and resets.
+Choose just `profile:…` to select its **project + provider + model**, or use `provider:… model:… project:…` directly. Reuse the profile for status, results, and resets:
+
+```text
+/ai run profile:review prompt:Review this project.
+/ai status profile:review
+/ai result profile:review
+```
+
+Profiles bind a configured project alias, so switching your current project does not redirect them. A conflicting `project` override is rejected; use direct provider/model/project options to choose another target. Existing profiles without a project keep using your current project until an admin binds them with `profile-set`. Profiles with the same project directory/provider/model share conversation history and the latest result.
 
 Personal settings survive restart; task options override them once. Profiles use their own model. `model:__default__` / `effort:default` selects CLI defaults. **Refresh models from CLI** updates choices after installation/login.
 
@@ -153,7 +161,7 @@ provider and create a profile directly in Discord:
 
 ```text
 /ai-admin provider-add provider:claude models:sonnet,opus default-model:sonnet
-/ai-admin profile-add name:writer provider:claude model:sonnet
+/ai-admin profile-add name:writer provider:claude project:web model:sonnet
 /ai run profile:writer prompt:Review this project.
 ```
 
@@ -166,6 +174,8 @@ Both activate immediately and survive restart. Existing defaults and schedules
 keep their targets. Duplicate providers/profiles are rejected: use
 `/ai-admin provider` to enable an existing provider or `profile-set` to replace a
 profile. `/ai-admin defaults profile:writer` changes the shared default.
+
+`profile-add` and `profile-set` require a project alias; omit model for CLI default. To bind an existing profile, use `/ai-admin profile-set name:review provider:claude project:web model:sonnet`. Local JSON profiles accept `"project": "web"` alongside `provider` and `model`. Build, restart and run `npm run register` once after upgrading for the new admin options. Profile changes that move or remove a captured project binding pause pending schedules; cancel and recreate them.
 
 Build, restart the bot and run `npm run register` once after upgrading to expose
 these new commands. Future additions need no restart or registration.

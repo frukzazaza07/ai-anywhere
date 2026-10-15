@@ -12,8 +12,8 @@
     "claude": { "enabled": false, "models": ["sonnet"] }
   },
   "profiles": {
-    "default": { "provider": "codex" },
-    "review": { "provider": "claude", "model": "sonnet" }
+    "default": { "project": "web", "provider": "codex" },
+    "review": { "project": "web", "provider": "claude", "model": "sonnet" }
   },
   "defaultProject": "web",
   "defaultProfile": "default"

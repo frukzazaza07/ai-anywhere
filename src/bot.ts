@@ -162,7 +162,8 @@ client.on(Events.InteractionCreate, interaction => {
             const provider = interaction.options.getString('provider', true);
             if (!isProviderId(provider)) throw new Error('AI_CONFIG_INVALID');
             change = { kind: action === 'profile-add' ? 'add-profile' : 'profile', name: interaction.options.getString('name', true),
-              profile: { provider, model: interaction.options.getString('model') ?? undefined } };
+              profile: { provider, model: interaction.options.getString('model') ?? undefined,
+                project: interaction.options.getString('project', true) } };
           } else if (action === 'provider-add') {
             const provider = interaction.options.getString('provider', true);
             if (!isProviderId(provider)) throw new Error('AI_CONFIG_INVALID');
@@ -233,7 +234,7 @@ client.on(Events.InteractionCreate, interaction => {
     try {
       selection = preferences.resolve(runtime.value, key, interaction.options.getString('provider'), interaction.options.getString('profile'),
         interaction.options.getString('model'), interaction.options.getString('effort'));
-      project = sessions.currentProject(key, interaction.options.getString('project'));
+      project = sessions.currentProject(key, interaction.options.getString('project'), selection);
     } catch (error) {
       await interaction.reply({ ...taskReply(taskErrorMessage(error)), flags: MessageFlags.Ephemeral });
       return;
@@ -241,7 +242,7 @@ client.on(Events.InteractionCreate, interaction => {
     const label = providerLabels[selection.provider];
     const resultCommand = (selection.profile ? '/ai result profile:' + selection.profile
       : '/ai result provider:' + selection.provider + ' model:' + (selection.model ?? cliDefaultModel))
-      + (selection.effort ? ' effort:' + selection.effort : '') + ' project:' + project.project;
+      + (selection.effort ? ' effort:' + selection.effort : '') + (selection.project ? '' : ' project:' + project.project);
     if (action === 'status') {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       try {

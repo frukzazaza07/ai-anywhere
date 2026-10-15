@@ -13,8 +13,8 @@ export interface CommandHelp {
 
 function sessionHelp(): CommandHelp[] {
   const prefix = '/ai';
-  const selection = ' [project:NAME] [profile:NAME | provider:CLI model:MODEL] [effort:LEVEL]';
-  const exampleSelection = ' profile:review project:web';
+  const selection = ' [profile:NAME | provider:CLI model:MODEL project:NAME] [effort:LEVEL]';
+  const exampleSelection = ' profile:review';
   return [
     { command: prefix + ' init', description: 'Admin: finish first-install configuration from locally approved projects and providers.',
       usage: prefix + ' init [project:NAME] [profile:NAME]', example: prefix + ' init project:default profile:codex',
@@ -34,7 +34,7 @@ function sessionHelp(): CommandHelp[] {
       notes: 'Does not delete project files, cancel schedules or stop a task. Rejected while the worker is busy.' },
     { command: prefix + ' result', description: 'Retrieve the latest result or sanitized failure for the selected session.',
       usage: prefix + ' result' + selection, example: prefix + ' result' + exampleSelection,
-      notes: 'Use the same project and profile/provider/model as your task, including when the original Discord reply expires. Results are private and kept in memory until reset/restart or replaced by a later result.' },
+      notes: 'Reuse the task profile alone, or the same provider/model/project, including when the original Discord reply expires. Profiles bind project/provider/model. Legacy profiles without project use your current project. A conflicting project override is rejected. Results are private and kept in memory until reset/restart or replaced by a later result.' },
     { command: prefix + ' models', description: 'List allowed models, the selected default and matching profiles for a provider.',
       usage: prefix + ' models [provider:CLI | profile:NAME]', example: prefix + ' models provider:codex',
       notes: 'Omit both options for personal defaults, otherwise the default profile. Loads model choices from the provider CLI without a prompt; while busy, shows saved choices. Autocomplete uses the last loaded catalog. npm run models -- --provider codex --discover inspects the same CLI catalog from a terminal.' },
@@ -71,13 +71,13 @@ export const commandHelp: readonly CommandHelp[] = [
     usage: '/ai-admin provider-add provider:CLI [models:MODEL1,MODEL2] [default-model:MODEL]',
     example: '/ai-admin provider-add provider:claude models:sonnet,opus default-model:sonnet',
     notes: 'Supports codex, claude and gemini. Requires completed /ai init. The CLI must already be installed and logged in on the bot host. Claude uses PATH or local CLAUDE_EXECUTABLE; Gemini requires local GEMINI_CLI_SCRIPT. Executable paths and credentials cannot be supplied through Discord. Admins may approve comma-separated model IDs; default-model is also approved. Omitted default-model uses the host model setting, otherwise CLI default. Use /ai models provider:CLI to discover additional models, then profile-add. Saves to ai.config.json and activates immediately. Existing providers are preserved; use provider to enable them. Defaults and saved schedules keep their targets.' },
-  { command: '/ai-admin profile-add', description: 'Create a new named provider/model profile without replacing an existing one.',
-    usage: '/ai-admin profile-add name:PROFILE provider:CLI [model:MODEL]',
-    example: '/ai-admin profile-add name:review provider:claude model:sonnet',
+  { command: '/ai-admin profile-add', description: 'Create a new named project/provider/model profile without replacing an existing one.',
+    usage: '/ai-admin profile-add name:PROFILE provider:CLI project:PROJECT [model:MODEL]',
+    example: '/ai-admin profile-add name:review provider:claude project:web model:sonnet',
     notes: 'Choose a registered provider and an allowed model from autocomplete. Omit model for CLI default. Profile names follow project alias rules. Duplicate names are rejected; use profile-set to replace an existing profile. Saves immediately and survives restart. Select it with /ai run profile:PROFILE prompt:YOUR_TASK; use defaults to make it the shared default.' },
-  { command: '/ai-admin profile-set', description: 'Create a profile or replace its provider/model pair.',
-    usage: '/ai-admin profile-set name:PROFILE provider:CLI [model:MODEL]',
-    example: '/ai-admin profile-set name:review provider:claude model:sonnet',
+  { command: '/ai-admin profile-set', description: 'Create a profile or replace its project/provider/model target.',
+    usage: '/ai-admin profile-set name:PROFILE provider:CLI project:PROJECT [model:MODEL]',
+    example: '/ai-admin profile-set name:review provider:claude project:web model:sonnet',
     notes: 'provider must be locally installed; model must be allowed locally. Omit model for CLI default, including when replacing an existing profile.' },
   { command: '/ai-admin profile-delete', description: 'Delete a profile after choosing another default if necessary.',
     usage: '/ai-admin profile-delete name:PROFILE', example: '/ai-admin profile-delete name:review',
@@ -102,7 +102,7 @@ const selectionGuide = [
   'Selection: /ai uses personal settings when configured, otherwise the shared default profile. Choose profile OR provider, never both.',
   'An explicit provider uses your saved model for that provider, otherwise its configured default. Add model:MODEL to choose an allowed model for one request. Model alone uses your selected provider, otherwise the default profile\'s provider. Choose a profile OR provider/model options.',
   'Use /ai models to list choices and model autocomplete to select. Use the same provider/model for status, result, new and clear. Effort applies to each turn and keeps model history. Providers: codex, claude, gemini (only enabled providers can run).',
-  'A profile binds provider/model; omitted model means CLI default. Equivalent pairs share conversation history. Use project aliases from autocomplete, never filesystem paths.',
+  'A profile binds project/provider/model: use profile alone for run, status, result, new and clear. Omitted model means CLI default. Legacy profiles without project use your current project. Conflicting project overrides are rejected; choose provider/model/project directly to change targets. Equivalent directory/provider/model selections share conversation history. Use project aliases from autocomplete, never filesystem paths.',
   'Example aliases web/review and model sonnet must be configured before use; replace them with your autocomplete selections.',
 ].join('\n');
 

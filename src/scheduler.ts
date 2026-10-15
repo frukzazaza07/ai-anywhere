@@ -6,6 +6,7 @@ import { cliDefaultModel, isModelName, isProviderId, validateSelection, type Pro
 import { isProjectName, selectProject, type ProjectConfig, type ProjectSelection } from './projects.js';
 import { type RuntimeConfig } from './runtime-config.js';
 import { validateEffort, type Effort } from './effort.js';
+import { profileProject, type SelectedProfile } from './selection.js';
 
 export interface Timing { nextRun: number; intervalMs?: number }
 export interface ScheduleInput { at?: string | null; after?: string | null; every?: string | null }
@@ -84,6 +85,7 @@ export interface ScheduledJob extends Timing {
   effort?: Effort;
   project?: string;
   profile?: string;
+  profileProject?: string;
   state: 'pending' | 'running' | 'completed' | 'failed' | 'paused';
   runs: number;
   lastOutcome?: string;
@@ -116,6 +118,7 @@ function validJob(value: unknown): value is ScheduledJob {
     && (job.model === undefined || isModelName(job.model))
     && (job.project === undefined || isProjectName(job.project))
     && (job.profile === undefined || isProjectName(job.profile))
+    && (job.profileProject === undefined || (isProjectName(job.profileProject) && job.profile !== undefined))
     && Number.isSafeInteger(job.nextRun) && job.nextRun > 0
     && (job.intervalMs === undefined || (Number.isSafeInteger(job.intervalMs) && job.intervalMs >= 60000 && job.intervalMs <= 365 * 86400000))
     && ['pending', 'running', 'completed', 'failed', 'paused'].includes(job.state)
@@ -189,6 +192,8 @@ export class CodexScheduler {
       const selected = { provider: job.provider ?? 'codex', model: job.model, ...(job.effort ? { effort: job.effort } : {}) };
       const p = job.profile ? this.options.runtime?.value.profiles.get(job.profile) : undefined;
       if (job.profile && (!p || p.provider !== selected.provider || p.model !== selected.model)) reason = 'profile deleted or provider/model changed';
+      else if (p && (job.profileProject !== undefined ? p.project !== job.profileProject
+        : p.project !== undefined && p.project !== job.project)) reason = 'profile project changed';
       else {
         try {
           if (this.providers) validateSelection(this.providers, selected);
@@ -226,14 +231,18 @@ export class CodexScheduler {
   }
 
   async add(owner: Pick<ScheduledJob, 'guildId' | 'channelId' | 'userId'>, prompt: string, timing: Timing,
-    selection: ProviderSelection = { provider: 'codex', model: this.providers?.models.codex },
+    selection: SelectedProfile = { provider: 'codex', model: this.providers?.models.codex },
     project?: string, profile?: string): Promise<ScheduledJob> {
     if (this.closing) throw new Error('AI_SHUTTING_DOWN');
     if (this.options.runtime?.value.source === 'setup') throw new Error('AI_SETUP_REQUIRED');
-    const selectedProject = this.projects ? selectProject(this.projects, project) : undefined;
-    if (project !== undefined && !selectedProject) throw new Error('AI_PROJECT_UNAVAILABLE');
+    profile ??= selection.profile;
+    const boundProject = selection.project ?? (profile ? this.options.runtime?.value.profiles.get(profile)?.project : undefined);
+    const target = profileProject({ ...selection, project: boundProject }, project);
+    const selectedProject = this.projects ? selectProject(this.projects, target) : undefined;
+    if (target !== undefined && !selectedProject) throw new Error('AI_PROJECT_UNAVAILABLE');
     const job: ScheduledJob = { ...owner, ...timing, prompt, id: randomUUID(),
-      ...selection, profile, project: selectedProject?.project, workdir: selectedProject?.workdir ?? this.options.workdir,
+      ...selection, profile, ...(boundProject ? { profileProject: boundProject } : {}),
+      project: selectedProject?.project, workdir: selectedProject?.workdir ?? this.options.workdir,
       sandbox: this.options.sandbox, state: 'pending', runs: 0 };
     if (!validJob(job) || !this.authorized(job) || job.nextRun <= this.now()) throw new Error('Invalid schedule.');
     if (this.jobs.size >= 500 || this.list(scheduleKey(job)).length >= 50) throw new Error('Schedule limit reached. Cancel old schedules first.');
@@ -310,7 +319,7 @@ export class CodexScheduler {
       try {
         await started.result;
         outcome = job.profile ? 'Completed. Read the latest result with /ai result profile:' + job.profile
-          + (job.project ? ' project:' + job.project : '') + '.'
+          + (job.project && !job.profileProject ? ' project:' + job.project : '') + '.'
           : 'Completed. Read the latest result with /ai result provider:' + (job.provider ?? 'codex')
           + ' model:' + (job.model ?? cliDefaultModel) + (job.effort ? ' effort:' + job.effort : '') + (job.project ? ' project:' + job.project : '') + '.';
         state = 'completed';

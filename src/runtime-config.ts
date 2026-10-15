@@ -8,7 +8,7 @@ import { isProjectName, prepareProjectDirectory, prepareProjectPath, projectConf
 import { isModelName, isProviderId, providerIds, type ProviderConfig, type ProviderId } from './providers.js';
 import { parseModelCatalog, type CliModel } from './model-catalog.js';
 
-export interface Profile { provider: ProviderId; model?: string }
+export interface Profile { provider: ProviderId; model?: string; project?: string }
 interface LocalProject { directory: string; enabled: boolean }
 interface LocalProvider { enabled: boolean; models: string[]; defaultModel?: string; executable?: string; script?: string }
 interface BaseConfig {
@@ -57,9 +57,10 @@ function object(value: unknown, keys?: readonly string[]): Record<string, unknow
 function name(value: unknown): string { if (!isProjectName(value)) return invalid(); return value; }
 function enabled(value: unknown): boolean { if (typeof value !== 'boolean') return invalid(); return value; }
 function profile(value: unknown): Profile {
-  const p = object(value, ['provider', 'model']);
+  const p = object(value, ['provider', 'model', 'project']);
   if (!isProviderId(p.provider) || (p.model !== undefined && !isModelName(p.model))) return invalid();
-  return { provider: p.provider, ...(p.model !== undefined ? { model: p.model as string } : {}) };
+  return { provider: p.provider, ...(p.model !== undefined ? { model: p.model as string } : {}),
+    ...(p.project !== undefined ? { project: name(p.project) } : {}) };
 }
 function parseBase(value: unknown, baseDirectory: string): BaseConfig {
   const data = object(value, ['version', 'projectRoots', 'projects', 'providers', 'profiles', 'defaultProject', 'defaultProfile']);
@@ -165,12 +166,14 @@ function snapshot(base: BaseConfig, overrides: ConfigOverrides, revision: number
   merged.defaultProfile = overrides.defaultProfile ?? base.defaultProfile;
   for (const p of Object.values(merged.profiles)) {
     const installed = merged.providers[p.provider];
-    if (!installed || (p.model !== undefined && !installed.models.includes(p.model))) return invalid();
+    if (!installed || (p.model !== undefined && !installed.models.includes(p.model))
+      || (p.project !== undefined && !Object.hasOwn(merged.projects, p.project))) return invalid();
   }
   const defaultProfile = merged.profiles[merged.defaultProfile];
   if (!Object.hasOwn(merged.projects, merged.defaultProject) || !merged.projects[merged.defaultProject]?.enabled
     || !Object.hasOwn(merged.profiles, merged.defaultProfile) || !defaultProfile
-    || !merged.providers[defaultProfile.provider]?.enabled) return invalid();
+    || !merged.providers[defaultProfile.provider]?.enabled
+    || (defaultProfile.project !== undefined && !merged.projects[defaultProfile.project]?.enabled)) return invalid();
   const models: ProviderConfig['models'] = {};
   const allowedModels: NonNullable<ProviderConfig['allowedModels']> = {};
   for (const id of providerIds) {
@@ -476,6 +479,7 @@ export class RuntimeConfig {
       'Project roots: ' + ([...c.projectRoots.keys()].join(', ') || 'none'),
       'Projects: ' + [...c.projects.directories.keys()].map(key => key + (c.projects.enabled?.has(key) ? '' : ' (disabled)')).join(', '),
       'Providers: ' + [...c.installedProviders].map(key => key + (c.providers.enabled.has(key) ? '' : ' (disabled)')).join(', '),
-      'Profiles:', ...[...c.profiles].map(([key, p]) => key + ': ' + p.provider + ' / ' + (p.model ?? 'CLI default'))].join('\n');
+      'Profiles:', ...[...c.profiles].map(([key, p]) => key + ': ' + p.provider + ' / ' + (p.model ?? 'CLI default')
+        + ' / project: ' + (p.project ?? 'current project (legacy)'))].join('\n');
   }
 }

@@ -64,11 +64,15 @@ All `/ai` session commands accept `profile` or `provider`/`model` options, exclu
 
 Command option/autocomplete limits follow the [Discord application command documentation](https://github.com/discord/discord-api-docs/blob/main/developers/interactions/application-commands.mdx).
 
-Project preferences remain per guild/channel/user. A missing or disabled preferred project produces an explicit reselection error instead of falling back. Listing and job management remain usable. Directory/provider/model/guild/channel/user determine session identity. Different profile names targeting one pair share history; edits to another model choose another session, and switching back recovers the earlier session. Sessions/results remain in memory.
+Profiles may bind a configured `project` alias alongside provider/model. `/ai-admin profile-add` and `profile-set` require the alias; version-1 files and overrides without this field retain legacy current-project behavior. Bound profiles resolve the same project for run/status/result/new/clear/context regardless of current-project preferences. An identical explicit project is accepted for compatibility; a conflicting override is rejected with guidance to use direct provider/model/project options. Explicit provider/model selections remain independent of profile project bindings. Disabled bound projects make profiles unavailable in user autocomplete and execution. Default profiles must have an enabled bound project. Config validation rejects unknown aliases and paths, and persistence retains the binding.
+
+Project preferences remain per guild/channel/user for direct selections and legacy unbound profiles. A missing or disabled preferred project produces an explicit reselection error instead of falling back. Bound profiles bypass stale current-project preferences. Listing and job management remain usable. Directory/provider/model/guild/channel/user determine session identity. Different profile names targeting the same directory/provider/model share history; edits to another target choose another session, and switching back recovers the earlier session. Sessions/results remain in memory. The project is optional in the persisted profile schema to avoid silently moving existing profiles and schedules during upgrade.
 
 ## Scheduled jobs
 
 Jobs capture profile name when selected and provider/model/project/canonical directory/sandbox at creation. Default changes and project preferences never redirect existing jobs. Missing or retargeted profiles, disabled providers, revoked models, and disabled/removed/remapped projects pause pending jobs during the config transition and persist the reason. Paused jobs require cancel/recreate; restoration does not resume them. Legacy jobs lacking profile retain their saved provider/model/directory, with exact-directory project alias migration. Legacy missing provider means Codex.
+
+Bound-profile jobs also persist `profileProject` so moving or removing that binding pauses pending jobs. Legacy jobs without this field keep their saved project; adding a profile binding to a different project pauses them rather than redirecting them. Result guidance uses only the profile for bound-profile jobs.
 
 ## Verification
 

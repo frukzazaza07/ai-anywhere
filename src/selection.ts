@@ -1,7 +1,16 @@
 import { cliDefaultModel, providerEffortChoices, selectProvider, validateProviderEffort, validateSelection, type ProviderSelection } from './providers.js';
 import { type RuntimeSnapshot } from './runtime-config.js';
+import { selectProject } from './projects.js';
 
-export interface SelectedProfile extends ProviderSelection { profile?: string }
+export interface SelectedProfile extends ProviderSelection { profile?: string; project?: string }
+
+/** Bound profiles keep the same target across run, status, result and resets. */
+export function profileProject(selection: SelectedProfile, project?: string | null): string | undefined {
+  if (selection.project !== undefined && project != null && project !== selection.project) {
+    throw new Error('AI_PROFILE_PROJECT_CONFLICT');
+  }
+  return selection.project ?? project ?? undefined;
+}
 
 export function selectCommand(config: RuntimeSnapshot, provider?: string | null,
   profile?: string | null, model?: string | null, effort?: string | null): SelectedProfile {
@@ -23,7 +32,9 @@ export function selectCommand(config: RuntimeSnapshot, provider?: string | null,
     if (model !== cliDefaultModel && !config.providers.allowedModels?.[selected.provider]?.includes(model)) throw new Error('AI_MODEL_NOT_ALLOWED');
     return validateSelection(config.providers, { provider: selected.provider, model: model === cliDefaultModel ? undefined : model });
   }
-  return { ...validateSelection(config.providers, selected), profile: selectedName };
+  if (selected.project !== undefined) selectProject(config.projects, selected.project);
+  return { ...validateSelection(config.providers, selected), profile: selectedName,
+    ...(selected.project !== undefined ? { project: selected.project } : {}) };
 }
 
 export interface Access { guildId: string | null; userId: string }
@@ -51,7 +62,9 @@ export function autocomplete(config: RuntimeSnapshot, access: Access, auth: Acce
     .filter(key => admin || !config.projects.enabled || config.projects.enabled.has(key));
   if (option === 'provider') values = [...(admin ? config.installedProviders : config.providers.enabled)];
   if (option === 'profile' || (option === 'name' && admin)) values = [...config.profiles]
-    .filter(([, p]) => admin || config.providers.enabled.has(p.provider)).map(([key]) => key);
+    .filter(([, p]) => admin || (config.providers.enabled.has(p.provider)
+      && (p.project === undefined || (config.projects.directories.has(p.project)
+        && (!config.projects.enabled || config.projects.enabled.has(p.project)))))).map(([key]) => key);
   if (option === 'model' && admin && provider && config.installedProviders.has(provider as ProviderSelection['provider'])) {
     values = [...(config.providers.allowedModels?.[provider as ProviderSelection['provider']] ?? [])];
   }

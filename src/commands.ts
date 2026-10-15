@@ -7,7 +7,7 @@ function providerOption(command: SlashCommandSubcommandBuilder): SlashCommandSub
   return command.addStringOption(option => option
     .setName('provider').setDescription('Enabled AI CLI (choose provider or profile)')
     .setAutocomplete(true))
-    .addStringOption(option => option.setName('profile').setDescription('Profile (omitted uses the default profile)')
+    .addStringOption(option => option.setName('profile').setDescription('Project/provider/model preset (omitted uses your defaults)')
       .setAutocomplete(true));
 }
 
@@ -81,13 +81,15 @@ function adminCommand() {
         .setMinLength(1).setMaxLength(2000))
       .addStringOption(option => option.setName('default-model').setDescription('Default model ID; added to allowed models; omit for host/CLI default')
         .setMinLength(1).setMaxLength(120)))
-    .addSubcommand(command => command.setName('profile-add').setDescription('Create a new profile with an allowed provider/model')
+    .addSubcommand(command => command.setName('profile-add').setDescription('Create a project/provider/model profile')
       .addStringOption(option => option.setName('name').setDescription('New profile name').setRequired(true).setMinLength(1).setMaxLength(32))
       .addStringOption(option => option.setName('provider').setDescription('Registered provider').setRequired(true).setAutocomplete(true))
+      .addStringOption(option => option.setName('project').setDescription('Project alias bound to this profile').setRequired(true).setAutocomplete(true))
       .addStringOption(option => option.setName('model').setDescription('Allowed model; omit for CLI default').setMaxLength(120).setAutocomplete(true)))
-    .addSubcommand(command => command.setName('profile-set').setDescription('Create or replace a profile with allowed provider/model')
+    .addSubcommand(command => command.setName('profile-set').setDescription('Create or replace a project/provider/model profile')
       .addStringOption(option => option.setName('name').setDescription('Profile name').setRequired(true).setMaxLength(32).setAutocomplete(true))
       .addStringOption(option => option.setName('provider').setDescription('Locally installed provider').setRequired(true).setAutocomplete(true))
+      .addStringOption(option => option.setName('project').setDescription('Project alias bound to this profile').setRequired(true).setAutocomplete(true))
       .addStringOption(option => option.setName('model').setDescription('Allowed model; omit for CLI default').setAutocomplete(true)))
     .addSubcommand(command => command.setName('profile-delete').setDescription('Delete a profile after changing defaults')
       .addStringOption(option => option.setName('name').setDescription('Profile name').setRequired(true).setAutocomplete(true)))
