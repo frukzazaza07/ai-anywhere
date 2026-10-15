@@ -67,6 +67,14 @@ export const commandHelp: readonly CommandHelp[] = [
   { command: '/ai-admin reload', description: 'Validate and reload the local base config together with saved overrides.',
     usage: '/ai-admin reload', example: '/ai-admin reload',
     notes: 'Use after local catalog edits. Invalid configuration keeps the previous generation active. Overrides take precedence over base values.' },
+  { command: '/ai-admin provider-add', description: 'Register and enable a supported CLI provider from Discord.',
+    usage: '/ai-admin provider-add provider:CLI [models:MODEL1,MODEL2] [default-model:MODEL]',
+    example: '/ai-admin provider-add provider:claude models:sonnet,opus default-model:sonnet',
+    notes: 'Supports codex, claude and gemini. Requires completed /ai init. The CLI must already be installed and logged in on the bot host. Claude uses PATH or local CLAUDE_EXECUTABLE; Gemini requires local GEMINI_CLI_SCRIPT. Executable paths and credentials cannot be supplied through Discord. Admins may approve comma-separated model IDs; default-model is also approved. Omitted default-model uses the host model setting, otherwise CLI default. Use /ai models provider:CLI to discover additional models, then profile-add. Saves to ai.config.json and activates immediately. Existing providers are preserved; use provider to enable them. Defaults and saved schedules keep their targets.' },
+  { command: '/ai-admin profile-add', description: 'Create a new named provider/model profile without replacing an existing one.',
+    usage: '/ai-admin profile-add name:PROFILE provider:CLI [model:MODEL]',
+    example: '/ai-admin profile-add name:review provider:claude model:sonnet',
+    notes: 'Choose a registered provider and an allowed model from autocomplete. Omit model for CLI default. Profile names follow project alias rules. Duplicate names are rejected; use profile-set to replace an existing profile. Saves immediately and survives restart. Select it with /ai run profile:PROFILE prompt:YOUR_TASK; use defaults to make it the shared default.' },
   { command: '/ai-admin profile-set', description: 'Create a profile or replace its provider/model pair.',
     usage: '/ai-admin profile-set name:PROFILE provider:CLI [model:MODEL]',
     example: '/ai-admin profile-set name:review provider:claude model:sonnet',
@@ -125,7 +133,7 @@ export function helpText(topic: HelpTopic = 'all'): string {
   if (topic !== 'admin') sections.push(selectionGuide);
   if (topic === 'all' || topic === 'admin') sections.push(
     'Admin commands require membership in both ADMIN_USER_IDS and the ordinary user allowlist. Blank ADMIN_USER_IDS disables management. All admin changes except status are rejected while a worker runs.',
-    'Admin edits persist as local overrides, except project-add which saves the new alias to ai.config.json. project-add accepts an absolute host directory or an optional locally configured root alias. Executables and the optional projectRoots catalog remain local settings.');
+    'Admin edits persist as local overrides, except project-add and provider-add which save to ai.config.json. project-add accepts an absolute host directory or an optional locally configured root alias. provider-add registers a supported CLI and optional approved model IDs. Executables and the optional projectRoots catalog remain local settings.');
   sections.push(...entries.map(entry => [entry.command, entry.description, 'Usage: ' + entry.usage,
     'Example: ' + entry.example, ...(entry.notes ? [entry.notes] : [])].join('\n')));
   if (topic === 'all' || topic === 'ai') sections.push(timingGuide());
@@ -142,7 +150,7 @@ export function helpReply(topic: string | null = null) {
     '**/ai**: run — send/schedule a task; status — worker/session information; result — retrieve the latest answer; new / clear — reset the selected conversation and result.',
     '**/ai**: models — list model choices; projects — list aliases; project — switch your current project; schedules — list your jobs; cancel — remove a schedule (a running task finishes).',
     '**/ai init** (admins only): finish first-install configuration with optional default project/profile choices; existing files are preserved.',
-    '**/ai-admin** (admins only): status — inspect config; reload — reload local files; profile-set / profile-delete — manage profiles; project / provider — enable or disable; project-add — register/create a project folder; defaults — change shared defaults.',
+    '**/ai-admin** (admins only): status — inspect config; reload — reload local files; provider-add — register a CLI; profile-add / profile-set / profile-delete — manage profiles; project / provider — enable or disable; project-add — register/create a project folder; defaults — change shared defaults.',
     '',
     'Quick start: /ai run prompt:Review the code → /ai status → /ai result',
     'Use autocomplete for configured aliases and models. Choose profile OR provider/model on /ai; omit selection for the default profile. Replies are private.',

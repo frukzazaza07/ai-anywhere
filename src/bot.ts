@@ -158,11 +158,16 @@ client.on(Events.InteractionCreate, interaction => {
         if (action === 'reload' || action === 'status') adminAction = action;
         else {
           let change: ConfigChange;
-          if (action === 'profile-set') {
+          if (action === 'profile-set' || action === 'profile-add') {
             const provider = interaction.options.getString('provider', true);
             if (!isProviderId(provider)) throw new Error('AI_CONFIG_INVALID');
-            change = { kind: 'profile', name: interaction.options.getString('name', true),
+            change = { kind: action === 'profile-add' ? 'add-profile' : 'profile', name: interaction.options.getString('name', true),
               profile: { provider, model: interaction.options.getString('model') ?? undefined } };
+          } else if (action === 'provider-add') {
+            const provider = interaction.options.getString('provider', true);
+            if (!isProviderId(provider)) throw new Error('AI_CONFIG_INVALID');
+            change = { kind: 'add-provider', provider, models: interaction.options.getString('models') ?? undefined,
+              defaultModel: interaction.options.getString('default-model') ?? undefined };
           } else if (action === 'profile-delete') change = { kind: 'delete-profile', name: interaction.options.getString('name', true) };
           else if (action === 'project-add') change = { kind: 'add-project', name: interaction.options.getString('name', true),
             root: interaction.options.getString('root') ?? undefined, directory: interaction.options.getString('directory') ?? undefined,

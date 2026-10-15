@@ -25,6 +25,12 @@ export function taskErrorMessage(error: unknown, provider: ProviderId = 'codex')
       case 'AI_SHUTTING_DOWN': return 'The bot is shutting down. Try again after it restarts.';
       case 'AI_TIMEOUT': return label + ' timeout';
       case 'AI_PROVIDER_DISABLED': return 'This AI provider is not enabled in local configuration.';
+      case 'AI_PROVIDER_SETUP': return 'Run /ai init to create ai.config.json before adding providers.';
+      case 'AI_PROVIDER_EXISTS': return 'This provider is already registered. Use /ai-admin provider to enable it, /ai models to refresh models, or /ai-admin profile-add to create a profile.';
+      case 'AI_PROVIDER_INSTALLATION': return 'Provider registration rejected. Check the host model setting and CLI installation: Claude uses PATH or local CLAUDE_EXECUTABLE; Gemini requires local GEMINI_CLI_SCRIPT. Restart after editing .env. Installation paths cannot be supplied through Discord.';
+      case 'AI_PROVIDER_CONFIG_CHANGED': return 'Local configuration changed. Run /ai-admin reload and retry the provider addition.';
+      case 'AI_PROVIDER_SAVE': return 'Unable to save the provider to ai.config.json. The previous configuration remains active. Check local storage permissions.';
+      case 'AI_PROFILE_EXISTS': return 'This profile already exists. Choose a new name or use /ai-admin profile-set to replace it.';
       case 'AI_PROJECT_UNAVAILABLE': return 'Project is unavailable. Use /ai project name:… to select an enabled project.';
       case 'AI_SELECTION_CONFLICT': return 'Choose a profile OR provider/model options, using only one selection style.';
       case 'AI_MODEL_NOT_ALLOWED': return 'This model is not allowed for the selected provider. Use /ai models and choose a model from autocomplete.';

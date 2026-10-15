@@ -14,11 +14,31 @@ Authorized admins can use `/ai init [project:ALIAS] [profile:NAME]` to create th
 
 ## Administrative boundary
 
-`/ai-admin status|reload|profile-set|profile-delete|project|project-add|provider|defaults` requires the configured guild, ALLOWED_USER_IDS and ADMIN_USER_IDS. Empty admins disable management. Profile replacement can select only a locally installed provider and an allowed model (or omit model for CLI default). Enablement changes reference existing local projects/installations. The optional projectRoots catalog and executables can be changed only on disk and reloaded; admins can supply an absolute directory to project-add. Defaults must remain usable; deleting a default profile or disabling its provider/default project requires a prior default change.
+`/ai-admin status|reload|provider-add|profile-add|profile-set|profile-delete|project|project-add|provider|defaults` requires the configured guild, ALLOWED_USER_IDS and ADMIN_USER_IDS. Empty admins disable management. Profile creation/replacement can select only a registered provider and an allowed model (or omit model for CLI default). `profile-add` rejects existing names; `profile-set` remains an upsert. Enablement changes reference existing local projects/installations. The optional projectRoots catalog and executables can be changed only on disk; admins can supply an absolute directory to project-add. Defaults must remain usable; deleting a default profile or disabling its provider/default project requires a prior default change.
+
+`provider-add provider:codex|claude|gemini [models:ID1,ID2] [default-model:ID]`
+registers a supported adapter after `/ai init`. Only the selected provider's host
+installation/model environment settings are consulted: bundled Codex, Claude on
+PATH or `CLAUDE_EXECUTABLE`, Gemini's `GEMINI_CLI_SCRIPT`. Paths and credentials
+cannot be provided in chat. Admins may approve syntactically validated model IDs;
+the selected default model (explicit or host-configured) is included in the allowed
+list. Other models can be discovered with `/ai models`. This extends the previous
+local-only catalog/installation registration policy; CLI execution restrictions
+are unchanged. No CLI installation or login is performed by the command.
+
+Provider registration saves to the base file, preserving unrelated JSON and
+overrides. It rejects duplicate providers, invalid host installation settings,
+unloaded local edits and save failures. The entire merged candidate is validated
+before atomic publication, with files checked again before rename. Success enables
+the provider immediately and updates autocomplete without changing defaults,
+profiles, preferences or captured schedule targets. `profile-add` then persists
+a new profile through the existing override mechanism. Both use the shared busy
+gate and schedule-pause listeners. As with project additions, run a single instance
+and avoid simultaneous local edits; filesystem checks are not compare-and-swap.
 
 Mutations validate the entire merged candidate before an atomic overrides write and snapshot publication. Failed writes retain the current snapshot. Reload validates base plus overrides before replacing either. Discord sees sanitized codes, aliases and models, never raw filesystem errors, paths or credentials.
 
-`project-add` is the exception to override-only persistence: it saves a new project
+`project-add`, like `provider-add`, saves to the base file: it saves a new project
 entry to `ai.config.json`, preserving unrelated JSON settings and relative entries.
 Optional `projectRoots` maps locally configured aliases to existing canonical roots;
 it is never supplied or changed through chat. The command requires file setup,

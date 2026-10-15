@@ -48,7 +48,7 @@ test('command definitions are independent of project inventory and accept more t
 test('only admin project-add accepts a directory; executable overrides remain local', () => {
   const admin = commands.find(command => command.name === 'ai-admin')!.toJSON();
   assert.deepEqual(admin.options?.map(option => option.name),
-    ['status', 'reload', 'profile-set', 'profile-delete', 'project', 'project-add', 'provider', 'defaults']);
+    ['status', 'reload', 'provider-add', 'profile-add', 'profile-set', 'profile-delete', 'project', 'project-add', 'provider', 'defaults']);
   for (const action of admin.options ?? []) {
     if (action.type !== 1) continue;
     assert.ok(action.options?.every(option => !['executable', 'script', 'path'].includes(option.name)
@@ -65,6 +65,22 @@ test('only admin project-add accepts a directory; executable overrides remain lo
   assert.ok(directory.type === 3 && !directory.required && !directory.autocomplete && directory.max_length === 1024);
   const create = add.options![3]!;
   assert.ok(create.type === 5 && !create.required);
+});
+
+test('provider-add offers supported adapters and model IDs; profile-add accepts a new name and dynamic selections', () => {
+  const admin = commands.find(command => command.name === 'ai-admin')!.toJSON();
+  const provider = admin.options!.find(option => option.name === 'provider-add')!;
+  assert.ok(provider.type === 1);
+  assert.deepEqual(provider.options?.map(option => option.name), ['provider', 'models', 'default-model']);
+  const adapter = provider.options![0]!;
+  assert.ok(adapter.type === 3 && adapter.required);
+  assert.deepEqual(adapter.choices?.map(choice => choice.value), ['codex', 'claude', 'gemini']);
+  const profile = admin.options!.find(option => option.name === 'profile-add')!;
+  assert.ok(profile.type === 1);
+  assert.deepEqual(profile.options?.map(option => option.name), ['name', 'provider', 'model']);
+  assert.ok(profile.options![0]!.type === 3 && profile.options![0]!.required && !profile.options![0]!.autocomplete);
+  assert.ok(profile.options![1]!.type === 3 && profile.options![1]!.required && profile.options![1]!.autocomplete);
+  assert.ok(profile.options![2]!.type === 3 && !profile.options![2]!.required && profile.options![2]!.autocomplete);
 });
 
 test('only /ai, /ai-admin and /help are registered and routed', () => {

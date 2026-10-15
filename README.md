@@ -110,7 +110,7 @@ Manual setup: copy [ai.config.example.json](ai.config.example.json) to `ai.confi
 
 `ai.config.json` replaces `.env` projects/providers/models/defaults. Legacy `.env` setups still work. Restart after changing credentials, access, sandbox, or timeout.
 
-Admin commands: `/ai-admin status`, `reload`, `profile-set`, `profile-delete`, `project`, `project-add`, `provider`, `defaults`. Admins can supply an absolute host directory when adding projects; executable settings remain local. Change defaults before disabling their targets. Invalid reloads preserve working settings. Details: `/help topic:admin`.
+Admin commands: `/ai-admin status`, `reload`, `provider-add`, `profile-add`, `profile-set`, `profile-delete`, `project`, `project-add`, `provider`, `defaults`. Admins can supply an absolute host directory when adding projects; executable settings remain local. Change defaults before disabling their targets. Invalid reloads preserve working settings. Details: `/help topic:admin`.
 
 To add projects from Discord, finish `/ai init`. After upgrading, build, restart
 the bot and run `npm run register` once to expose the updated command. An allowed
@@ -148,7 +148,29 @@ including newly created parents. Inspect any cleanup failure locally before retr
 
 ### Optional providers
 
-Install/login as the bot's computer user, then configure and enable locally:
+Install/login as the bot's computer user. After `/ai init`, register a supported
+provider and create a profile directly in Discord:
+
+```text
+/ai-admin provider-add provider:claude models:sonnet,opus default-model:sonnet
+/ai-admin profile-add name:writer provider:claude model:sonnet
+/ai run profile:writer prompt:Review this project.
+```
+
+This supports the existing Codex, Claude Code and Gemini CLI adapters. It does
+not install CLIs or add arbitrary API services. `models` approves comma-separated
+model IDs; `default-model` is also added to the allowed models. Omit these options
+for host/CLI defaults, then use `/ai models provider:claude` to discover models.
+Provider additions save to `ai.config.json`; profiles save to local overrides.
+Both activate immediately and survive restart. Existing defaults and schedules
+keep their targets. Duplicate providers/profiles are rejected: use
+`/ai-admin provider` to enable an existing provider or `profile-set` to replace a
+profile. `/ai-admin defaults profile:writer` changes the shared default.
+
+Build, restart the bot and run `npm run register` once after upgrading to expose
+these new commands. Future additions need no restart or registration.
+
+CLI paths and login credentials remain host settings:
 
 | Provider | Requirement / login | Local setting |
 | --- | --- | --- |
@@ -160,6 +182,12 @@ Claude rejects script wrappers. Find Gemini's path in PowerShell:
 ```powershell
 Join-Path (npm root -g) '@google/gemini-cli/dist/index.js'
 ```
+
+For Discord registration, set `GEMINI_CLI_SCRIPT` in the host `.env` to that
+absolute entry point before starting the bot. Optionally set `CLAUDE_EXECUTABLE`
+to a native executable; otherwise Claude uses PATH. Restart after editing `.env`.
+`provider-add` copies only the selected provider's host installation settings;
+paths, executable overrides and credentials are never accepted through Discord.
 
 [Optional-provider setup and authentication](docs/quickstart.md#optional-projects-and-providers).
 

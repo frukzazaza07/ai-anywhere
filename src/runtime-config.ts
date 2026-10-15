@@ -39,6 +39,8 @@ export interface RuntimeSnapshot {
 }
 export type ConfigChange =
   | { kind: 'add-project'; name: string; root?: string; directory?: string; create: boolean }
+  | { kind: 'add-provider'; provider: ProviderId; models?: string; defaultModel?: string }
+  | { kind: 'add-profile'; name: string; profile: Profile }
   | { kind: 'profile'; name: string; profile: Profile }
   | { kind: 'delete-profile'; name: string }
   | { kind: 'project'; name: string; enabled: boolean }
@@ -333,10 +335,14 @@ export class RuntimeConfig {
   }
   async change(change: ConfigChange): Promise<void> {
     if (change.kind === 'add-project') return this.addProject(change);
+    if (change.kind === 'add-provider') return this.addProvider(change);
     return this.mutate(async () => {
       const overrides = structuredClone(this.overrides);
       try {
-        if (change.kind === 'profile') (overrides.profiles ??= {})[name(change.name)] = profile(change.profile);
+        if (change.kind === 'add-profile' && this.current.profiles.has(change.name)) throw new Error('AI_PROFILE_EXISTS');
+        if (change.kind === 'profile' || change.kind === 'add-profile') {
+          (overrides.profiles ??= {})[name(change.name)] = profile(change.profile);
+        }
         if (change.kind === 'delete-profile') {
           if (!this.current.profiles.has(change.name) || change.name === this.current.defaultProfile) return invalid();
           if (Object.hasOwn(this.base.profiles, change.name)) (overrides.profiles ??= {})[change.name] = null;
@@ -357,9 +363,57 @@ export class RuntimeConfig {
         catch { throw new Error('AI_CONFIG_SAVE'); }
         this.overrides = overrides; this.current = next;
       } catch (error) {
-        if (error instanceof Error && error.message === 'AI_CONFIG_SAVE') throw error;
+        if (error instanceof Error && ['AI_CONFIG_SAVE', 'AI_PROFILE_EXISTS'].includes(error.message)) throw error;
         throw new Error('AI_CONFIG_INVALID');
       }
+    });
+  }
+  private async addProvider(change: Extract<ConfigChange, { kind: 'add-provider' }>): Promise<void> {
+    return this.mutate(async () => {
+      if (this.current.source !== 'file') throw new Error('AI_PROVIDER_SETUP');
+      if (!isProviderId(change.provider)) throw new Error('AI_CONFIG_INVALID');
+      if (this.current.installedProviders.has(change.provider)) throw new Error('AI_PROVIDER_EXISTS');
+      const models = change.models === undefined ? [] : change.models.split(',').map(value => value.trim());
+      if (!models.every(isModelName) || new Set(models).size !== models.length
+        || (change.defaultModel !== undefined && !isModelName(change.defaultModel))) throw new Error('AI_CONFIG_INVALID');
+      // Installation paths come exclusively from host settings, never Discord options.
+      const env = this.options.env ?? process.env;
+      const modelKey = change.provider.toUpperCase() + '_MODEL';
+      let local: ProviderConfig;
+      try {
+        local = providerConfig({ AI_PROVIDERS: change.provider, AI_DEFAULT_PROVIDER: change.provider,
+          [modelKey]: env[modelKey],
+          ...(change.provider === 'claude' ? { CLAUDE_EXECUTABLE: env.CLAUDE_EXECUTABLE } : {}),
+          ...(change.provider === 'gemini' ? { GEMINI_CLI_SCRIPT: env.GEMINI_CLI_SCRIPT } : {}) });
+      } catch { throw new Error('AI_PROVIDER_INSTALLATION'); }
+      const defaultModel = change.defaultModel ?? local.models[change.provider];
+      if (defaultModel !== undefined && !models.includes(defaultModel)) models.push(defaultModel);
+      const checkConfig = async () => {
+        try {
+          const loaded = await this.read();
+          if (loaded.text !== this.baseText || !isDeepStrictEqual(loaded.base, this.base)
+            || !isDeepStrictEqual(loaded.overrides, this.overrides)) throw new Error();
+        } catch { throw new Error('AI_PROVIDER_CONFIG_CHANGED'); }
+      };
+      await checkConfig();
+      const document = object(JSON.parse(this.baseText!));
+      const providers = object(document.providers);
+      providers[change.provider] = { enabled: true, models, ...(defaultModel !== undefined ? { defaultModel } : {}),
+        ...(change.provider === 'claude' && local.claudeExecutable ? { executable: local.claudeExecutable } : {}),
+        ...(change.provider === 'gemini' ? { script: local.geminiScript } : {}) };
+      let base: BaseConfig;
+      let next: RuntimeSnapshot;
+      try {
+        base = parseBase(document, dirname(this.options.file));
+        next = snapshot(base, this.overrides, this.current.revision + 1, 'file');
+      } catch { throw new Error('AI_CONFIG_INVALID'); }
+      const text = JSON.stringify(document, null, 2) + '\n';
+      try { await (this.options.write ?? atomicConfigWrite)(this.options.file, text, checkConfig); }
+      catch (error) {
+        if (error instanceof Error && error.message === 'AI_PROVIDER_CONFIG_CHANGED') throw error;
+        throw new Error('AI_PROVIDER_SAVE');
+      }
+      this.base = base; this.baseText = text; this.current = next;
     });
   }
   private async addProject(change: Extract<ConfigChange, { kind: 'add-project' }>): Promise<void> {
