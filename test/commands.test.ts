@@ -4,7 +4,7 @@ import { commands, commandNames, createCommands } from '../src/commands.js';
 
 test('/ai exposes dynamic provider/profile options and leaves schedule management provider-neutral', () => {
   const definition = commands.find(command => command.name === 'ai')!.toJSON();
-  assert.deepEqual(definition.options?.map(option => option.name), ['run', 'new', 'status', 'context', 'clear', 'result', 'models', 'config', 'schedules', 'cancel', 'projects', 'project', 'init']);
+  assert.deepEqual(definition.options?.map(option => option.name), ['run', 'new', 'status', 'context', 'clear', 'result', 'stop', 'jobs', 'changes', 'models', 'config', 'schedules', 'cancel', 'projects', 'project', 'init']);
   for (const option of definition.options ?? []) {
     assert.equal(option.type, 1);
     if (option.type !== 1) continue;
@@ -14,7 +14,7 @@ test('/ai exposes dynamic provider/profile options and leaves schedule managemen
       assert.deepEqual(option.options?.map(value => value.name), ['provider', 'model', 'effort']);
       continue;
     }
-    if (['schedules', 'cancel', 'projects', 'project', 'init'].includes(option.name)) { assert.equal(provider, undefined); continue; }
+    if (['stop', 'jobs', 'changes', 'schedules', 'cancel', 'projects', 'project', 'init'].includes(option.name)) { assert.equal(provider, undefined); continue; }
     assert.ok(provider && provider.type === 3);
     assert.ok(!provider.required);
     assert.equal(provider.choices, undefined);
@@ -36,7 +36,7 @@ test('command definitions are independent of project inventory and accept more t
     for (const action of actions) {
       if (action.type !== 1) continue;
       const choice = action.options?.find(option => option.name === (action.name === 'project' ? 'name' : 'project'));
-      if (['schedules', 'cancel', 'projects', 'models', 'config'].includes(action.name)) { assert.equal(choice, undefined); continue; }
+      if (['stop', 'jobs', 'changes', 'schedules', 'cancel', 'projects', 'models', 'config'].includes(action.name)) { assert.equal(choice, undefined); continue; }
       assert.ok(choice && choice.type === 3);
       assert.equal(choice.choices, undefined);
       assert.equal(choice.autocomplete, true);

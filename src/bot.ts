@@ -20,18 +20,24 @@ import { modelCatalog, modelsText } from './models.js';
 import { ProviderPreferences } from './provider-preferences.js';
 import { configPickerPrefix, configPicker, updateConfigPicker } from './config-picker.js';
 import { ModelCatalogService } from './model-catalog-service.js';
+import { JobHistory, JobManager, ownerFromKey } from './jobs.js';
+import { changesReply } from './changes.js';
 
 const discord = discordConfig();
-let sessions: ProjectSessions;
+let jobs: JobManager | undefined;
 const runtime = new RuntimeConfig({ file: resolve('ai.config.json'), overridesFile: resolve('.ai-config-overrides.json'),
-  allowSetup: true, busy: () => sessions?.busy ?? false });
+  allowSetup: true, busy: () => jobs?.busy ?? false });
 await runtime.load();
 if (runtime.value.source === 'setup') console.log('Initial setup required: run /ai init as an allowed admin. The default project candidate is the bot startup directory.');
 const worker = workerConfig(runtime.value);
 const preferences = new ProviderPreferences(resolve('.ai-preferences.json'));
 await preferences.load();
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
-sessions = new ProjectSessions({ ...worker, runtime });
+const sessions = new ProjectSessions({ ...worker, runtime });
+const history = new JobHistory(resolve('.ai-jobs'));
+await history.load();
+const manager = new JobManager({ history, sessions, sandbox: worker.sandbox });
+jobs = manager;
 const auth = { guildId: discord.guildId, allowedUsers: worker.allowedUsers, adminUsers: worker.adminUsers };
 
 const scheduler = new CodexScheduler({
@@ -40,12 +46,13 @@ const scheduler = new CodexScheduler({
   providers: worker.providers,
   projects: worker.projects,
   runtime,
-  busy: () => sessions.busy, run: (key, prompt, selection, project) => sessions.prompt(key, prompt, selection, project),
+  busy: () => manager.busy, run: (key, prompt, selection, project, schedule) =>
+    manager.submit({ owner: ownerFromKey(key), prompt, selection, project, schedule }).result,
 });
 await scheduler.load();
 const shutdown = new Shutdown({ stopScheduler: () => scheduler.shutdown(),
-  stopWorker: () => sessions.shutdown(), closeClient: () => client.destroy() });
-const catalogs = new ModelCatalogService(runtime, undefined, () => sessions.busy || shutdown.stopping);
+  stopWorker: () => manager.shutdown(), closeClient: () => client.destroy() });
+const catalogs = new ModelCatalogService(runtime, undefined, () => manager.busy || shutdown.stopping);
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, () => {
     if (!shutdown.stopping) console.log('Shutting down; waiting for accepted tasks to finish.');
@@ -91,6 +98,12 @@ client.on(Events.InteractionCreate, interaction => {
     if (interaction.isAutocomplete()) {
       if (!commandNames.has(interaction.commandName)) return;
       const focused = interaction.options.getFocused(true);
+      const subcommand = interaction.commandName === 'ai' ? interaction.options.getSubcommand(false) : null;
+      if (focused.name === 'id' && (subcommand === 'result' || subcommand === 'stop' || subcommand === 'changes')) {
+        await interaction.respond(authorized(access, auth) ? manager.choices({ ...access, admin: authorized(access, auth, true) },
+          String(focused.value), subcommand === 'stop') : []);
+        return;
+      }
       const profile = interaction.options.getString('profile');
       const provider = interaction.options.getString('provider') ?? (profile == null ? preferences.selectedProvider(key) : undefined);
       const saved = provider && isProviderId(provider) ? preferences.get(key, provider) : undefined;
@@ -138,7 +151,7 @@ client.on(Events.InteractionCreate, interaction => {
       if (runtime.value.source !== 'file' && defaults.project === undefined && defaults.profile === undefined) {
         try {
           if (shutdown.stopping) throw new Error('AI_SHUTTING_DOWN');
-          if (sessions.busy || runtime.updating) throw new Error('CODEX_BUSY');
+          if (manager.busy || runtime.updating) throw new Error('CODEX_BUSY');
           await interaction.showModal(initializationDialog(runtime, access, auth));
         } catch (error) {
           await interaction.reply({ ...taskReply(taskErrorMessage(error)), flags: MessageFlags.Ephemeral });
@@ -209,6 +222,42 @@ client.on(Events.InteractionCreate, interaction => {
       } catch { await interaction.editReply(taskReply('Unable to save schedule cancellation. Try again.')); }
       return;
     }
+    // Job commands address jobs by ID and work while the worker is busy.
+    const requester = { ...access, admin: authorized(access, auth, true) };
+    if (action === 'stop') {
+      const id = interaction.options.getString('id');
+      const { outcome, job } = manager.stop(requester, id);
+      const target = 'Job ' + (job?.id ?? id ?? '');
+      const content = {
+        stopping: 'Stopping ' + target + '. Its CLI process tree is being terminated; files it already changed are not reverted. Check /ai result id:' + job?.id + ' for the outcome.',
+        'already-stopping': target + ' is already stopping. Check /ai result id:' + job?.id + ' shortly.',
+        dequeued: target + ' was removed from the queue before it started; it did not run.',
+        finished: target + ' already finished (' + job?.state + '). Nothing to stop; see /ai result id:' + job?.id + '.',
+        denied: target + ' belongs to another user. Only its owner or an admin can stop it.',
+        'not-found': 'Job ' + id + ' was not found. Use /ai jobs to list your jobs.',
+        idle: 'No AI task is running.',
+      }[outcome];
+      await interaction.reply({ content, flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
+      return;
+    }
+    if (action === 'jobs') {
+      await interaction.reply({ ...taskReply(manager.jobsText(requester)), flags: MessageFlags.Ephemeral });
+      return;
+    }
+    if (action === 'result' && interaction.options.getString('id') !== null) {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const details = await manager.details(requester, interaction.options.getString('id', true).trim().toLowerCase());
+      await interaction.editReply(taskReply(details.text, details.job?.provider));
+      return;
+    }
+    if (action === 'changes') {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const id = interaction.options.getString('id', true).trim().toLowerCase();
+      const details = await manager.details(requester, id);
+      await interaction.editReply(details.job ? changesReply(details.job.id, details.job.project, details.job.changes,
+        details.job.state, interaction.options.getInteger('page') ?? 1) : taskReply(details.text));
+      return;
+    }
     if (action === 'models') {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       try {
@@ -248,7 +297,8 @@ client.on(Events.InteractionCreate, interaction => {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       try {
         checkRevision();
-        const status = sessions.status(key, selection, project.project) + (selection.provider === 'codex' ? '\n\n' + await codexLimitsStatus({
+        const active = manager.activeText(requester);
+        const status = (active ? active + '\n\n' : '') + sessions.status(key, selection, project.project) + (selection.provider === 'codex' ? '\n\n' + await codexLimitsStatus({
           workdir: project.workdir, includeContext: true, ...sessions.contextState(key, selection, project.project),
         }) : '');
         await interaction.editReply({
@@ -315,8 +365,10 @@ client.on(Events.InteractionCreate, interaction => {
         return;
       }
     }
-    if (sessions.busy) {
-      await interaction.reply({ content: 'An AI worker is busy. Try again after the task finishes.',
+    const queue = action === 'run' && (interaction.options.getBoolean('queue') ?? false);
+    if (manager.busy && !queue) {
+      await interaction.reply({ content: 'An AI worker is busy. Try again after the task finishes'
+          + (action === 'run' ? ', or add queue:true to wait in the queue.' : '.'),
         flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
       return;
     }
@@ -337,26 +389,45 @@ client.on(Events.InteractionCreate, interaction => {
       });
       return;
     }
+    let jobId: string | undefined;
+    let progress: ReturnType<typeof setInterval> | undefined;
+    let edits: Promise<unknown> = Promise.resolve();
     try {
       // Acknowledge immediately; jobs may take several minutes.
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-      await interaction.editReply({
-        content: label + ' is running in project ' + project.project + ' | Model: ' + (selection.model ?? 'CLI default')
-          + ' | Effort: ' + (selection.effort ?? 'CLI default') + '. Retrieve the saved result with ' + resultCommand + ' in this user/channel if this reply expires.',
-        allowedMentions: { parse: [] },
-      });
-      const started = await runtime.exclusive(() => {
+      const submitted = await runtime.exclusive(() => {
         checkRevision();
-        return { result: sessions.prompt(key, interaction.options.getString('prompt', true), selection, project.project) };
+        return manager.submit({ owner: { guildId: interaction.guildId!, channelId: interaction.channelId, userId: interaction.user.id },
+          prompt: interaction.options.getString('prompt', true), selection, project: project.project, queue });
       });
-      const result = await started.result;
-      if (!await deliverTaskReply(interaction, result, Date.now(), selection.provider)) {
+      jobId = submitted.job.id;
+      const id = jobId;
+      const intro = (submitted.position
+        ? 'Job ' + id + ' queued at position ' + submitted.position + '. It starts automatically when the worker is free.'
+        : 'Job ' + id + ' started.')
+        + '\n' + label + ' · project ' + project.project + ' · Model: ' + (selection.model ?? 'CLI default')
+        + ' · Effort: ' + (selection.effort ?? 'CLI default')
+        + '\nThis reply updates every 30s. If it expires: /ai result id:' + id + ' (or ' + resultCommand + ').';
+      await interaction.editReply({ content: intro + '\n\n' + manager.progress(id), allowedMentions: { parse: [] } });
+      // Edit the same private reply instead of posting new messages; stop before the 15-minute token expires.
+      progress = setInterval(() => {
+        if (Date.now() - interaction.createdTimestamp > 14 * 60 * 1000) { clearInterval(progress); return; }
+        edits = edits.then(() => interaction.editReply({ content: intro + '\n\n' + manager.progress(id), allowedMentions: { parse: [] } }))
+          .catch(() => {});
+      }, 30000);
+      const result = await submitted.result;
+      clearInterval(progress);
+      await edits;
+      if (!await deliverTaskReply(interaction, manager.outcomeLine(id) + '\n\n' + result, Date.now(), selection.provider)) {
         console.log('Task completed; retrieve the saved result from Discord.');
       }
     } catch (error) {
+      clearInterval(progress);
+      await edits;
       // Keep raw CLI logs out of Discord because they can contain project information.
-      console.error('AI task failed. Check local CLI login, workdir, permissions and timeout.');
-      const content = taskErrorMessage(error, selection.provider);
+      if (error instanceof Error && ['AI_CANCELLED', 'AI_QUEUE_CANCELLED'].includes(error.message)) console.log('AI job stopped from Discord.');
+      else console.error('AI task failed. Check local CLI login, workdir, permissions and timeout.');
+      const content = (jobId ? manager.outcomeLine(jobId) + '\n\n' : '') + taskErrorMessage(error, selection.provider);
       if (interaction.deferred) await deliverTaskReply(interaction, content, Date.now(), selection.provider);
       else await interaction.reply({ content, flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
     }

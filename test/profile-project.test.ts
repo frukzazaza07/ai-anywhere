@@ -93,6 +93,28 @@ test('running profile status/results remain readable and one worker still guards
   assert.match(sessions.status('user', selection), /Completed turns: 1/);
 });
 
+test('a stopped task keeps the last completed session and frees the worker', async t => {
+  const f = await runtimeFixture(t);
+  const selection = selectCommand(f.runtime.value, 'codex', null, 'm2');
+  let turn = 0;
+  const signals: Array<AbortSignal | undefined> = [];
+  const sessions = new ProjectSessions({ runtime: f.runtime, workdir: f.directory,
+    projects: f.runtime.value.projects, sandbox: 'read-only' }, (_prompt, options) => {
+    signals.push(options.signal);
+    if (++turn === 1) { options.onSession?.('s1'); return Promise.resolve('first'); }
+    return new Promise((_resolve, reject) => options.signal?.addEventListener('abort', () => reject(new Error('AI_CANCELLED'))));
+  });
+  await sessions.prompt('user', 'first', selection, 'web');
+  const controller = new AbortController();
+  const running = sessions.prompt('user', 'long', selection, 'web', { signal: controller.signal });
+  assert.equal(signals[1], controller.signal);
+  controller.abort();
+  await assert.rejects(running, /AI_CANCELLED/);
+  assert.equal(sessions.busy, false);
+  assert.match(sessions.result('user', selection, 'web'), /stopped/);
+  assert.match(sessions.status('user', selection, 'web'), /Session: s1\n.*Completed turns: 1/s);
+});
+
 test('profile project validation, persistence, disabled targets and default protection use configured aliases only', async t => {
   const f = await runtimeFixture(t);
   await f.runtime.change({ kind: 'profile', name: 'api-review', profile: { project: 'api', provider: 'codex', model: 'm2' } });
@@ -193,7 +215,7 @@ test('profile-only schedules capture project and survive restart/default changes
   await restored.load(); now += 100; await restored.tick();
   assert.deepEqual(calls, [{ provider: 'codex', model: 'm2', project: 'api' }]);
   assert.equal(sessions.result(scheduleKey(owner), selectCommand(f.runtime.value, null, 'api-review')), 'scheduled answer');
-  assert.equal(restored.list(scheduleKey(owner))[0]?.lastOutcome, 'Completed. Read the latest result with /ai result profile:api-review.');
+  assert.equal(restored.list(scheduleKey(owner))[0]?.lastOutcome, 'Completed. Read the latest result with /ai result profile:api-review. Every run is kept separately in /ai jobs.');
 });
 
 test('changing or removing a profile project permanently pauses its captured schedules', async t => {

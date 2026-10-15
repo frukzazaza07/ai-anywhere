@@ -1,5 +1,5 @@
 import { runAgent, type AgentRunOptions } from './agent-runner.js';
-import { AiSessions, type SessionContextState } from './sessions.js';
+import { AiSessions, type SessionContextState, type TaskControl } from './sessions.js';
 import { ProjectPreferences, type ProjectConfig, type ProjectSelection } from './projects.js';
 import { type ProviderConfig } from './providers.js';
 import { type RuntimeConfig } from './runtime-config.js';
@@ -76,15 +76,15 @@ export class ProjectSessions {
     await this.active?.catch(() => {});
   }
 
-  async prompt(key: string, prompt: string, selection: SelectedProfile, project?: string): Promise<string> {
+  async prompt(key: string, prompt: string, selection: SelectedProfile, project?: string, control: TaskControl = {}): Promise<string> {
     if (this.closing) throw new Error('AI_SHUTTING_DOWN');
     if (this.busy) throw new Error('CODEX_BUSY');
     // No await before the underlying session claims the worker.
-    const result = this.session(key, project, selection).prompt(key, prompt, selection);
+    const result = this.session(key, project, selection).prompt(key, prompt, selection, control);
     this.active = result;
+    const settle = () => { if (this.active === result) this.active = undefined; };
     // Register cleanup without creating an unhandled rejection on task failure.
-    void result.then(() => { if (this.active === result) this.active = undefined; },
-      () => { if (this.active === result) this.active = undefined; });
+    void result.then(settle, settle);
     return result;
   }
 }

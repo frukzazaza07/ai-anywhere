@@ -4,6 +4,8 @@ import { mkdtemp, mkdir, readFile, stat, writeFile, rm } from 'node:fs/promises'
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { runCodex } from '../src/runner.js';
+import { executeCli } from '../src/agent-runner.js';
+import { codexActivity, commandActivity, geminiActivity } from '../src/activity.js';
 import { CodexSessions } from '../src/sessions.js';
 import { taskErrorMessage } from '../src/results.js';
 
@@ -111,6 +113,100 @@ test('timeout terminates a stalled CLI task', async () => {
     await writeFile(script, 'setInterval(() => {}, 1000);');
     await assert.rejects(runCodex('hello', { workdir: dir, sandbox: 'read-only', timeoutMs: 200, cliScript: script }), /CODEX_TIMEOUT/);
   } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('aborting terminates a stalled CLI task without a deadline', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'codex-stop-test-'));
+  try {
+    const script = join(dir, 'stall.mjs');
+    await writeFile(script, 'setInterval(() => {}, 1000);');
+    const controller = new AbortController();
+    const running = runCodex('hello', { workdir: dir, sandbox: 'read-only', cliScript: script, signal: controller.signal });
+    setTimeout(() => controller.abort(), 200);
+    await assert.rejects(running, /AI_CANCELLED/);
+    await assert.rejects(runCodex('hello', { workdir: dir, sandbox: 'read-only', cliScript: script, signal: AbortSignal.abort() }), /AI_CANCELLED/);
+    await assert.rejects(executeCli(process.execPath, [script], {}, '', { workdir: dir, sandbox: 'read-only', signal: AbortSignal.abort() }), /AI_CANCELLED/);
+    const agent = new AbortController();
+    const cli = executeCli(process.execPath, [script], { ...process.env }, '', { workdir: dir, sandbox: 'read-only', signal: agent.signal });
+    setTimeout(() => agent.abort(), 200);
+    await assert.rejects(cli, /AI_CANCELLED/);
+    assert.match(taskErrorMessage(new Error('AI_CANCELLED'), 'claude'), /Claude.*stopped.*not reverted/);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+function alive(pid: number): boolean {
+  try { process.kill(pid, 0); return true; } catch { return false; }
+}
+
+test('stopping terminates the whole CLI process tree before the worker is released', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'codex-tree-test-'));
+  try {
+    const pidFile = join(dir, 'grandchild.pid');
+    const script = join(dir, 'tree.mjs');
+    // The fake CLI starts a long-lived child of its own, like a test runner or build tool.
+    await writeFile(script, [
+      "import { spawn } from 'node:child_process';",
+      "import { writeFileSync } from 'node:fs';",
+      "const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });",
+      'writeFileSync(' + JSON.stringify(pidFile) + ', String(child.pid));',
+      'setInterval(() => {}, 1000);',
+    ].join('\n'));
+    for (const run of [
+      (signal: AbortSignal) => runCodex('hello', { workdir: dir, sandbox: 'read-only', cliScript: script, signal }),
+      (signal: AbortSignal) => executeCli(process.execPath, [script], { ...process.env }, '', { workdir: dir, sandbox: 'read-only', signal }),
+    ]) {
+      await rm(pidFile, { force: true });
+      const controller = new AbortController();
+      const running = run(controller.signal);
+      let grandchild = 0;
+      for (let index = 0; index < 200 && !grandchild; index++) {
+        await new Promise(resolve => setTimeout(resolve, 25));
+        grandchild = Number(await readFile(pidFile, 'utf8').catch(() => '0'));
+      }
+      assert.ok(grandchild > 0 && alive(grandchild));
+      controller.abort();
+      await assert.rejects(running, /AI_CANCELLED/);
+      // No orphaned or zombie descendant remains once the task has settled.
+      assert.equal(alive(grandchild), false);
+    }
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('Codex JSON events become fixed activity labels without exposing commands or text', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'codex-progress-test-'));
+  try {
+    const script = join(dir, 'events.mjs');
+    await writeFile(script, [
+      "import { writeFileSync } from 'node:fs';",
+      "const out = process.argv[process.argv.indexOf('--output-last-message') + 1];",
+      "for (const event of [{ type: 'turn.started' }, { type: 'item.started', item: { type: 'command_execution', command: 'npm test -- --token=SECRET' } },",
+      "  { type: 'item.started', item: { type: 'file_change', changes: [{ path: 'private.txt' }] } }]) console.log(JSON.stringify(event));",
+      "console.log('plain text');",
+      "writeFileSync(out, 'done');",
+    ].join('\n'));
+    const reports: Array<string | undefined> = [];
+    assert.equal(await runCodex('hello', { workdir: dir, sandbox: 'read-only', cliScript: script, onProgress: activity => reports.push(activity) }), 'done');
+    assert.deepEqual(reports, ['Started working', 'Running tests', 'Editing files', undefined]);
+    assert.doesNotMatch(JSON.stringify(reports), /SECRET|private|npm/);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('activity labels map provider events and command kinds', () => {
+  assert.equal(commandActivity('bash -lc "rg TODO src"'), 'Reading files');
+  assert.equal(commandActivity('pytest -q'), 'Running tests');
+  assert.equal(commandActivity('npm run build'), 'Building or checking the project');
+  assert.equal(commandActivity('git status --short'), 'Checking Git');
+  assert.equal(commandActivity('npm ci'), 'Installing dependencies');
+  assert.equal(commandActivity('python script.py'), 'Running a command');
+  assert.equal(codexActivity({ type: 'item.started', item: { type: 'reasoning' } }), 'Thinking');
+  assert.equal(codexActivity({ type: 'item.completed', item: { type: 'reasoning' } }), undefined);
+  assert.equal(codexActivity({ type: 'thread.started' }), undefined);
+  assert.equal(codexActivity('not an object'), undefined);
+  assert.equal(geminiActivity({ type: 'tool_use', tool_name: 'read_file', parameters: { path: 'x' } }), 'Reading files');
+  assert.equal(geminiActivity({ type: 'tool_use', tool_name: 'write_file' }), 'Editing files');
+  assert.equal(geminiActivity({ type: 'tool_use', tool_name: 'custom' }), 'Using a tool');
+  assert.equal(geminiActivity({ type: 'message', role: 'assistant', content: 'hi' }), 'Writing a response');
+  assert.equal(geminiActivity({ type: 'result' }), undefined);
 });
 
 test('JSON session events enable explicit resume while preserving sandbox and stdin', async () => {

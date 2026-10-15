@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { validateEffort, type Effort } from './effort.js';
+import { codexActivity } from './activity.js';
 
 const maxOutputBytes = 2_000_000;
 
@@ -18,6 +19,10 @@ export interface RunOptions {
   model?: string;
   effort?: Effort;
   onSession?: (sessionId: string, contextWindows?: Record<string, number>) => void;
+  // Aborting terminates the worker process tree; completed file edits are not reverted.
+  signal?: AbortSignal;
+  // Called on CLI output with a fixed activity label when one is recognized; never raw output.
+  onProgress?: (activity?: string) => void;
   // Override only in local tests; never expose this setting through chat.
   cliScript?: string;
 }
@@ -36,22 +41,36 @@ export function workerEnvironment(): NodeJS.ProcessEnv {
   return env;
 }
 
-export function terminateWorker(child: ChildProcess): void {
-  if (child.pid === undefined) return;
+/** Kill the worker process tree; resolves after the kill completed (and, on POSIX, the group is gone). */
+export function terminateWorker(child: ChildProcess): Promise<void> {
+  const pid = child.pid;
+  if (pid === undefined) return Promise.resolve();
   if (process.platform === 'win32') {
-    const killer = spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], {
-      shell: false, windowsHide: true, stdio: 'ignore',
+    return new Promise(resolve => {
+      const killer = spawn('taskkill', ['/pid', String(pid), '/t', '/f'], {
+        shell: false, windowsHide: true, stdio: 'ignore',
+      });
+      killer.on('error', () => { child.kill(); resolve(); });
+      killer.on('close', code => { if (code !== 0) child.kill(); resolve(); });
     });
-    killer.on('error', () => child.kill());
-    killer.on('close', code => { if (code !== 0) child.kill(); });
-  } else {
-    try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); }
+  }
+  try { process.kill(-pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); }
+  return processGroupExited(pid);
+}
+
+async function processGroupExited(pid: number, timeoutMs = 5000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    // Signal 0 only checks whether any process in the group remains.
+    try { process.kill(-pid, 0); } catch { return; }
+    await new Promise(resolve => setTimeout(resolve, 50));
   }
 }
 
 export async function runCodex(prompt: string, options: RunOptions): Promise<string> {
   validateEffort('codex', options.model, options.effort);
   if (!prompt.trim() || prompt.length > 4000) throw new Error('Prompt must contain 1–4000 characters');
+  if (options.signal?.aborted) throw new Error('AI_CANCELLED');
   const temporary = await mkdtemp(join(tmpdir(), 'discord-codex-'));
   const outputFile = join(temporary, 'answer.txt');
   const env = workerEnvironment();
@@ -78,15 +97,20 @@ export async function runCodex(prompt: string, options: RunOptions): Promise<str
       });
       let failure: string | undefined;
       let bytes = 0;
+      let terminated: Promise<void> = Promise.resolve();
+      const terminate = (reason: string) => {
+        if (failure) return;
+        failure = reason;
+        terminated = terminateWorker(child);
+      };
       // Bound bytes before readline can accumulate an unfinished JSON event.
       const stdout = new Transform({ transform(chunk: Buffer, _encoding, callback) {
         bytes += chunk.length;
         if (bytes > maxOutputBytes) {
           if (!failure) {
-            failure = 'AI_OUTPUT_LIMIT';
             events.close();
             stdout.resume();
-            terminateWorker(child);
+            terminate('AI_OUTPUT_LIMIT');
           }
           callback();
         } else callback(null, failure ? undefined : chunk);
@@ -100,23 +124,31 @@ export async function runCodex(prompt: string, options: RunOptions): Promise<str
             && /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(event.thread_id)) {
             sessionId = event.thread_id;
           }
-        } catch { /* Ignore non-event CLI output. */ }
+          options.onProgress?.(codexActivity(event));
+        } catch { options.onProgress?.(); }
       });
       child.on('close', () => { child.stdout.unpipe(stdout); events.close(); stdout.destroy(); });
-      const timer = options.timeoutMs && options.timeoutMs > 0 ? setTimeout(() => {
-        if (!failure) { failure = 'CODEX_TIMEOUT'; terminateWorker(child); }
-      }, options.timeoutMs) : undefined;
+      const timer = options.timeoutMs && options.timeoutMs > 0
+        ? setTimeout(() => terminate('CODEX_TIMEOUT'), options.timeoutMs) : undefined;
+      const cancel = () => terminate('AI_CANCELLED');
+      options.signal?.addEventListener('abort', cancel, { once: true });
+      // The signal may have fired while temporary output was being prepared.
+      if (options.signal?.aborted) cancel();
       child.stderr.on('data', (chunk: Buffer) => {
         stderr = (stderr + chunk.toString('utf8')).slice(-8000);
       });
       // Early exit (for example authentication failure) can close stdin before delivery.
       child.stdin.on('error', () => {});
-      child.on('error', error => { clearTimeout(timer); reject(error); });
+      child.on('error', error => { clearTimeout(timer); options.signal?.removeEventListener('abort', cancel); reject(error); });
       child.on('close', code => {
         clearTimeout(timer);
-        if (failure) reject(new Error(failure));
-        else if (code !== 0) reject(new Error(`Codex exited with code ${code}. ${stderr}`));
-        else resolve();
+        options.signal?.removeEventListener('abort', cancel);
+        // Release the worker only after the whole process tree has been terminated.
+        void terminated.then(() => {
+          if (failure) reject(new Error(failure));
+          else if (code !== 0) reject(new Error(`Codex exited with code ${code}. ${stderr}`));
+          else resolve();
+        });
       });
       child.stdout.pipe(stdout);
       // Chat text is data on stdin. Characters such as quotes, $, & and backticks are not shell code.

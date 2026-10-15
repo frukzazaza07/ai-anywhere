@@ -97,7 +97,8 @@ interface SchedulerOptions {
   guildId: string;
   allowedUsers: ReadonlySet<string>;
   busy: () => boolean;
-  run: (key: string, prompt: string, selection: ProviderSelection, project?: string) => Promise<string>;
+  // Each dispatch is a separate job; the schedule ID and run number keep runs apart in history.
+  run: (key: string, prompt: string, selection: ProviderSelection, project?: string, schedule?: { id: string; run: number }) => Promise<string>;
   providers?: ProviderConfig;
   projects?: ProjectConfig;
   runtime?: RuntimeConfig;
@@ -308,7 +309,8 @@ export class CodexScheduler {
         if (this.closing || this.options.busy()) { job.state = 'pending'; await this.save(); return; }
         // Release the config gate after the session synchronously claims the shared worker.
         const result = (async () => this.options.run(scheduleKey(job), job.prompt,
-          { provider: job.provider ?? 'codex', model: job.model, ...(job.effort ? { effort: job.effort } : {}) }, job.project))();
+          { provider: job.provider ?? 'codex', model: job.model, ...(job.effort ? { effort: job.effort } : {}) }, job.project,
+          { id: job.id, run: job.runs + 1 }))();
         return { job, result };
       };
       const started = this.options.runtime ? await this.options.runtime.exclusive(prepare) : await prepare();
@@ -318,10 +320,11 @@ export class CodexScheduler {
       let state: ScheduledJob['state'];
       try {
         await started.result;
-        outcome = job.profile ? 'Completed. Read the latest result with /ai result profile:' + job.profile
+        outcome = (job.profile ? 'Completed. Read the latest result with /ai result profile:' + job.profile
           + (job.project && !job.profileProject ? ' project:' + job.project : '') + '.'
           : 'Completed. Read the latest result with /ai result provider:' + (job.provider ?? 'codex')
-          + ' model:' + (job.model ?? cliDefaultModel) + (job.effort ? ' effort:' + job.effort : '') + (job.project ? ' project:' + job.project : '') + '.';
+          + ' model:' + (job.model ?? cliDefaultModel) + (job.effort ? ' effort:' + job.effort : '') + (job.project ? ' project:' + job.project : '') + '.')
+          + ' Every run is kept separately in /ai jobs.';
         state = 'completed';
       } catch (error) {
         if (error instanceof Error && error.message === 'CODEX_BUSY') {

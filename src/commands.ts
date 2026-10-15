@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, type SlashCommandSubcommandBuilder } from 'discord.js';
+import { SlashCommandBuilder, type SlashCommandStringOption, type SlashCommandSubcommandBuilder } from 'discord.js';
 import { helpTopics } from './help.js';
 
 export const commandNames = new Set(['ai', 'ai-admin', 'help']);
@@ -21,6 +21,10 @@ function sessionOptions(command: SlashCommandSubcommandBuilder): SlashCommandSub
     .setAutocomplete(true));
 }
 
+function jobOption(option: SlashCommandStringOption): SlashCommandStringOption {
+  return option.setName('id').setDescription('Job ID from /ai jobs').setMinLength(8).setMaxLength(8).setAutocomplete(true);
+}
+
 function buildCommand() {
   return new SlashCommandBuilder()
     .setName('ai').setDescription('Run AI tasks and manage your session')
@@ -34,7 +38,9 @@ function buildCommand() {
       .addStringOption(option => option
         .setName('after').setDescription('Run once after a delay, e.g. 10m or 2 hours').setMaxLength(100))
       .addStringOption(option => option
-        .setName('every').setDescription('Repeat at an interval, e.g. 30m, 2 hours or 1 day (minimum 1m)').setMaxLength(100))))
+        .setName('every').setDescription('Repeat at an interval, e.g. 30m, 2 hours or 1 day (minimum 1m)').setMaxLength(100)))
+      .addBooleanOption(option => option
+        .setName('queue').setDescription('If the worker is busy, wait in the queue instead of being rejected')))
     .addSubcommand(command => sessionOptions(command
       .setName('new').setDescription('Start a fresh AI conversation')))
     .addSubcommand(command => sessionOptions(command
@@ -44,7 +50,16 @@ function buildCommand() {
     .addSubcommand(command => sessionOptions(command
       .setName('clear').setDescription('Clear your current AI conversation context')))
     .addSubcommand(command => sessionOptions(command
-      .setName('result').setDescription('Retrieve your latest completed AI task result')))
+      .setName('result').setDescription('Retrieve your latest result, or a saved job by ID')).addStringOption(jobOption))
+    .addSubcommand(command => command
+      .setName('stop').setDescription('Stop a running or queued job (admins can stop any job); edits are not reverted')
+      .addStringOption(jobOption))
+    .addSubcommand(command => command
+      .setName('jobs').setDescription('List your recent jobs with ID, state and duration'))
+    .addSubcommand(command => command
+      .setName('changes').setDescription('Show files and Git diff changed by a job (read-only)')
+      .addStringOption(option => jobOption(option).setRequired(true))
+      .addIntegerOption(option => option.setName('page').setDescription('Diff page (default 1)').setMinValue(1).setMaxValue(1000)))
     .addSubcommand(command => providerOption(command
       .setName('models').setDescription('List allowed models, selected default and matching profiles')))
     .addSubcommand(command => command.setName('config').setDescription('Choose and save your provider, model and effort for this channel')
@@ -54,7 +69,7 @@ function buildCommand() {
     .addSubcommand(command => command
       .setName('schedules').setDescription('List all provider schedules for your current user and channel'))
     .addSubcommand(command => command
-      .setName('cancel').setDescription('Cancel a schedule; a running task will finish')
+      .setName('cancel').setDescription('Cancel a schedule; use stop to end a running task')
       .addStringOption(option => option
         .setName('id').setDescription('Schedule ID from schedules').setRequired(true).setMaxLength(36)))
     .addSubcommand(command => command

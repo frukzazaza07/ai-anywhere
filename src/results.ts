@@ -24,6 +24,9 @@ export function taskErrorMessage(error: unknown, provider: ProviderId = 'codex')
       case 'AI_INIT_STALE': return 'The configuration changed or the bot restarted while this setup form was open. Run /ai init again to use the current choices.';
       case 'AI_SHUTTING_DOWN': return 'The bot is shutting down. Try again after it restarts.';
       case 'AI_TIMEOUT': return label + ' timeout';
+      case 'AI_QUEUE_FULL': return 'The job queue is full. Try again after queued jobs finish, or remove one with /ai stop id:….';
+      case 'AI_QUEUE_CANCELLED': return 'The queued job was removed before it started; it did not run.';
+      case 'AI_CANCELLED': return label + ' task was stopped. Files it already changed are not reverted; the conversation resumes from the last completed turn.';
       case 'AI_PROVIDER_DISABLED': return 'This AI provider is not enabled in local configuration.';
       case 'AI_PROVIDER_SETUP': return 'Run /ai init to create ai.config.json before adding providers.';
       case 'AI_PROVIDER_EXISTS': return 'This provider is already registered. Use /ai-admin provider to enable it, /ai models to refresh models, or /ai-admin profile-add to create a profile.';

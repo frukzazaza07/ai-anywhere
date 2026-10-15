@@ -23,3 +23,6 @@ ai.config.json~
 .ai-preferences.json
 .ai-preferences.json.*
 .ai-preferences.json~
+
+# Private job history: prompts, results and diffs.
+.ai-jobs/

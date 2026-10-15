@@ -1,7 +1,7 @@
 import { constants, closeSync, fstatSync, lstatSync, openSync, readFileSync, realpathSync } from 'node:fs';
 import { isAbsolute, join, relative, sep, win32 } from 'node:path';
 
-const privateFile = /(^|\/)(?:\.env(?:[.~].*)?|ai\.config\.json(?:[.~].*)?|\.ai-config-overrides\.json(?:[.~].*)?|\.ai-preferences\.json(?:[.~].*)?|\.codex-schedules\.json(?:[.~].*)?|\.git|\.verification|node_modules|node-24|dist)(?:\/|$)|(?:^|\/)[^/]*\.log$/;
+const privateFile = /(^|\/)(?:\.env(?:[.~].*)?|ai\.config\.json(?:[.~].*)?|\.ai-config-overrides\.json(?:[.~].*)?|\.ai-preferences\.json(?:[.~].*)?|\.codex-schedules\.json(?:[.~].*)?|\.ai-jobs|\.git|\.verification|node_modules|node-24|dist)(?:\/|$)|(?:^|\/)[^/]*\.log$/;
 
 function isPrivate(file) {
   const name = process.platform === 'win32' ? file.toLowerCase() : file;

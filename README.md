@@ -80,11 +80,14 @@ Type `/` and select options from autocomplete.
 | Command | Purpose |
 | --- | --- |
 | `/help` | All commands and examples; `topic:ai` or `topic:admin` narrows the guide |
-| `/ai run prompt:…` | Run a task |
+| `/ai run prompt:…` | Run a task; its private reply shows the job ID and updates progress every 30 s. Add `queue:true` to wait if the worker is busy |
 | `/ai config` | Save your provider, model, and effort using dropdowns |
 | `/ai models` | Load available models from the installed CLI |
 | `/ai projects` / `/ai project name:…` | List / switch projects |
 | `/ai status` / `/ai result` | Check progress / retrieve the latest answer |
+| `/ai jobs` / `/ai result id:…` | List your job history / open any saved job, including after restart |
+| `/ai stop [id:…]` | Stop a running job or withdraw a queued one (admins: any job); edits are not reverted |
+| `/ai changes id:…` | Files and Git diff changed by that job (read-only, paged for mobile) |
 | `/ai context` | Show context window usage for the current Claude or Codex session |
 | `/ai new` / `/ai clear` | Reset the selected conversation and result |
 | `/ai schedules` / `/ai cancel id:…` | List / remove schedules |
@@ -110,6 +113,7 @@ Personal settings survive restart; task options override them once. Profiles use
 | `.ai-config-overrides.json` | Admin changes/model catalogs; overrides base config |
 | `.ai-preferences.json` | Saved personal provider/model/effort settings |
 | `.codex-schedules.json` | Saved schedules |
+| `.ai-jobs/` | Job history: prompts, results and per-job diffs (newest 200 jobs) |
 | `CODEX_SANDBOX=read-only` | Read files; use `workspace-write` to allow edits |
 | `CODEX_TIMEOUT_SECONDS=0` | No deadline; a positive number sets seconds for every provider |
 
@@ -211,16 +215,17 @@ paths, executable overrides and credentials are never accepted through Discord.
 
 Choose one: `after:` (delay), `every:` (repeat, minimum 1 minute), or `at:` (future date). `YYYY-MM-DD HH:mm` uses Bangkok time (UTC+07:00); ISO dates accept timezones.
 
-Schedules survive restart and keep their original targets/settings. Changed/disabled targets pause jobs; cancel and recreate. Jobs wait for the worker and skip missed repeat intervals. Use `/ai result` for answers; no automatic posts. Cancelling leaves active tasks running.
+Schedules survive restart and keep their original targets/settings. Changed/disabled targets pause jobs; cancel and recreate. Jobs wait for the worker and skip missed repeat intervals. Each run is saved as its own job; use `/ai jobs` and `/ai result id:…` for answers; no automatic posts. Cancelling leaves active tasks running; use `/ai stop` to end one.
 
 ## Limits and safety
 
-- One shared worker. Immediate requests are rejected while busy; no task queue.
-- Conversations, current-project choices, and results disappear on restart. Sessions are isolated by server/channel/user + folder + provider/model.
-- Prompts: 4,000 characters. Results: 1 MB; long answers become attachments. Replies expire after 15 minutes; use `/ai result`.
+- One shared worker. Immediate requests are rejected while busy unless `queue:true` is set; up to 5 queued jobs then run one at a time in order. Queued jobs are cancelled, not replayed, on restart or shutdown.
+- Job history (prompts, results, diffs) is kept in `.ai-jobs/` across restarts; jobs interrupted by a restart are marked failed and never replayed. Conversations, current-project choices and the in-memory latest result disappear on restart. Sessions are isolated by server/channel/user + folder + provider/model.
+- Prompts: 4,000 characters. Results: 1 MB; long answers become attachments. Replies expire after 15 minutes; use `/ai result id:…`.
 - Accounts, quota, billing, and host access are shared. Allow trusted users only.
 - Claude/Gemini use restricted file tools; shell tools are disabled. No Discord approval prompts.
-- Timeouts cannot undo edits. Without a deadline, shutdown can wait indefinitely.
+- `/ai changes` needs a Git repository and `workspace-write`; it diffs private snapshots taken before and after the job, so earlier uncommitted edits and other jobs are excluded (hand edits made during the job are not). Likely secrets are hidden.
+- Timeouts and `/ai stop` cannot undo edits. Without a deadline, shutdown waits for the active task; use `/ai stop` to end a stalled one.
 
 Read [SECURITY.md](SECURITY.md) before granting access.
 

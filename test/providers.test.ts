@@ -239,7 +239,7 @@ test('provider sessions, saved results, resets and model changes remain isolated
   assert.equal(calls.at(-1)?.sessionId, undefined);
   assert.equal(calls.at(-1)?.model, 'another-model');
   assert.throws(() => sessions.result('alice', { provider: 'codex', model: 'old-model' }), /AI_INVALID_SELECTION/);
-  assert.match(sessions.status('bob', { provider: 'claude' }), /quota and context usage: unavailable/);
+  assert.match(sessions.status('bob', { provider: 'claude' }), /Account quota: unavailable for this provider\. Context usage: \/ai context\./);
   assert.doesNotMatch(sessions.status('bob', { provider: 'claude' }), /C:\/projects/);
 });
 

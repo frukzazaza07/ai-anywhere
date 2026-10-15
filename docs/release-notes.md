@@ -9,12 +9,12 @@ Follow [the English quickstart](quickstart.md) or [README](../README.md). Use No
 ## Upgrade
 
 1. Stop the old bot with Ctrl+C/SIGTERM and wait for active work to finish. Older versions without shutdown handling may interrupt tasks; review their project changes.
-2. Back up `.env`, `ai.config.json`, `.ai-config-overrides.json`, `.ai-preferences.json` and `.codex-schedules.json` privately. Preserve paths, accounts and permissions. Check project changes made by tasks before replacing code.
+2. Back up `.env`, `ai.config.json`, `.ai-config-overrides.json`, `.ai-preferences.json`, `.codex-schedules.json` and the `.ai-jobs/` directory privately. Preserve paths, accounts and permissions. Check project changes made by tasks before replacing code.
 3. Check out the beta tag once published or extract its source into a new directory, restore the local settings and schedule file, then run `npm ci`, `npm run doctor`, `npm run build` and `npm test`.
 4. Run `npm run register` once to expose `/ai config`, model/effort options and `/ai init`, and remove the matching legacy `/codex` command. Use `/ai run provider:codex` or a Codex profile. Start only one bot instance.
 5. Verify saved schedules still point at their original aliases/directories and provider/model/effort. Changed or removed targets pause; they never move to a new default. Recreate paused jobs deliberately.
 
-To roll back, stop the bot, restore the previous checkout and its matching private state backup, rebuild and register its command schema. Check for already completed or interrupted jobs before enabling schedules; restoring stale state can repeat work. Sessions/results are not included in backups because they exist only in memory.
+To roll back, stop the bot, restore the previous checkout and its matching private state backup, rebuild and register its command schema. Check for already completed or interrupted jobs before enabling schedules; restoring stale state can repeat work. Sessions and the latest per-session result are not included in backups because they exist only in memory; job history in `.ai-jobs/` is.
 
 ## Included behavior
 

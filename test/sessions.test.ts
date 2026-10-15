@@ -13,7 +13,7 @@ test('/ai offers scheduling options and management subcommands', () => {
   assert.deepEqual(definitions.map(command => command.name), ['ai', 'ai-admin', 'help']);
   assert.deepEqual([...commandNames], ['ai', 'ai-admin', 'help']);
   const actions = definitions[0]?.options ?? [];
-  assert.deepEqual(actions.map(action => action.name), ['run', 'new', 'status', 'context', 'clear', 'result', 'models', 'config', 'schedules', 'cancel', 'projects', 'project', 'init']);
+  assert.deepEqual(actions.map(action => action.name), ['run', 'new', 'status', 'context', 'clear', 'result', 'stop', 'jobs', 'changes', 'models', 'config', 'schedules', 'cancel', 'projects', 'project', 'init']);
   assert.ok(actions.every(action => action.type === 1));
   const run = actions[0];
   assert.ok(run && run.type === 1);
@@ -23,7 +23,7 @@ test('/ai offers scheduling options and management subcommands', () => {
   assert.equal(prompt.required, true);
   assert.equal(prompt.min_length, 1);
   assert.equal(prompt.max_length, 4000);
-  assert.deepEqual(run.options?.map(option => option.name), ['prompt', 'at', 'after', 'every', 'provider', 'profile', 'model', 'effort', 'project']);
+  assert.deepEqual(run.options?.map(option => option.name), ['prompt', 'at', 'after', 'every', 'provider', 'profile', 'model', 'effort', 'project', 'queue']);
   assert.ok(run.options?.slice(1).every(option => !option.required));
   assert.ok(actions.slice(1, 5).every(action => action.type === 1 && action.options?.some(option => option.name === 'project')));
   const schedules = actions.find(action => action.name === 'schedules');
@@ -32,6 +32,16 @@ test('/ai offers scheduling options and management subcommands', () => {
   assert.ok(cancel && cancel.type === 1);
   assert.equal(cancel.options?.[0]?.name, 'id');
   assert.equal(cancel.options?.[0]?.required, true);
+  const stop = actions.find(action => action.name === 'stop');
+  assert.ok(stop?.type === 1 && stop.options?.length === 1);
+  for (const name of ['result', 'stop', 'changes']) {
+    const action = actions.find(item => item.name === name);
+    const id = action?.type === 1 ? action.options?.find(option => option.name === 'id') : undefined;
+    assert.ok(id && id.type === 3 && id.autocomplete && id.min_length === 8 && id.max_length === 8);
+    assert.equal(id.required, name === 'changes');
+  }
+  const jobs = actions.find(action => action.name === 'jobs');
+  assert.ok(jobs?.type === 1 && !jobs.options?.length);
 });
 
 test('follow-up prompts resume only the same user and channel session', async () => {

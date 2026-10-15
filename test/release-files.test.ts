@@ -41,7 +41,7 @@ test('release files reject private state, backups and ignored artifact directori
   const f = fixture(t);
   assertNoOpen(t, () => {
     for (const file of ['.env', '.env~', '.env.local', 'docs/.env.example', 'ai.config.json',
-      '.ai-config-overrides.json.tmp', '.ai-preferences.json~', '.codex-schedules.json.bak',
+      '.ai-config-overrides.json.tmp', '.ai-preferences.json~', '.codex-schedules.json.bak', '.ai-jobs/1a2b3c4d.json',
       '.verification/notes.md', 'node-24/package.json', 'node_modules/package.json', 'dist/bot.js', '.git/config', 'debug.log']) {
       assert.throws(() => readReleaseFile(f.root, file), /private runtime file tracked/);
     }

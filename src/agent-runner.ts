@@ -6,6 +6,7 @@ import { runCodex, terminateWorker, workerEnvironment, type RunOptions } from '.
 import { isModelName, isProviderId, type ProviderId } from './providers.js';
 import { validateEffort } from './effort.js';
 import { claudeContextWindows } from './claude-context.js';
+import { geminiActivity } from './activity.js';
 
 export interface AgentRunOptions extends RunOptions {
   provider?: ProviderId;
@@ -17,31 +18,53 @@ const sessionPattern = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
 const maxOutputBytes = 2_000_000;
 
 export function executeCli(executable: string, args: string[], env: NodeJS.ProcessEnv,
-  prompt: string, options: RunOptions): Promise<string> {
+  prompt: string, options: RunOptions, onLine?: (line: string) => void): Promise<string> {
   return new Promise<string>((resolve, reject) => {
+    if (options.signal?.aborted) { reject(new Error('AI_CANCELLED')); return; }
     const child = spawn(executable, args, { cwd: options.workdir, env, shell: false,
       windowsHide: true, detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'] });
     const chunks: Buffer[] = [];
     let bytes = 0;
     let failure: string | undefined;
-    const timer = options.timeoutMs && options.timeoutMs > 0 ? setTimeout(() => {
-      failure ??= 'AI_TIMEOUT';
-      terminateWorker(child);
-    }, options.timeoutMs) : undefined;
+    let terminated: Promise<void> = Promise.resolve();
+    let pending = '';
+    const terminate = (reason: string) => {
+      if (failure) return;
+      failure = reason;
+      terminated = terminateWorker(child);
+    };
+    const timer = options.timeoutMs && options.timeoutMs > 0
+      ? setTimeout(() => terminate('AI_TIMEOUT'), options.timeoutMs) : undefined;
+    const cancel = () => terminate('AI_CANCELLED');
+    options.signal?.addEventListener('abort', cancel, { once: true });
     child.stdout.on('data', (chunk: Buffer) => {
       bytes += chunk.length;
-      if (bytes > maxOutputBytes) {
-        if (!failure) { failure = 'AI_OUTPUT_LIMIT'; terminateWorker(child); }
-      } else if (!failure) chunks.push(chunk);
+      if (bytes > maxOutputBytes) terminate('AI_OUTPUT_LIMIT');
+      else if (!failure) {
+        chunks.push(chunk);
+        if (!onLine) { options.onProgress?.(); return; }
+        const lines = (pending + chunk.toString('utf8')).split('\n');
+        // Bound an unfinished line; activity is best-effort and the full output is parsed later.
+        pending = (lines.pop() ?? '').slice(-65536);
+        if (!lines.length) options.onProgress?.();
+        for (const line of lines) onLine(line);
+      }
     });
     // Drain diagnostics without storing project content or credentials.
     child.stderr.resume();
     child.stdin.on('error', () => {});
-    child.on('error', () => { clearTimeout(timer); reject(new Error('AI_PROVIDER_UNAVAILABLE')); });
+    child.on('error', () => {
+      clearTimeout(timer); options.signal?.removeEventListener('abort', cancel);
+      reject(new Error('AI_PROVIDER_UNAVAILABLE'));
+    });
     child.on('close', code => {
       clearTimeout(timer);
-      if (failure || code !== 0) reject(new Error(failure ?? 'AI_TASK_FAILED'));
-      else resolve(Buffer.concat(chunks).toString('utf8'));
+      options.signal?.removeEventListener('abort', cancel);
+      // Release the worker only after the whole process tree has been terminated.
+      void terminated.then(() => {
+        if (failure || code !== 0) reject(new Error(failure ?? 'AI_TASK_FAILED'));
+        else resolve(Buffer.concat(chunks).toString('utf8'));
+      });
     });
     child.stdin.end(prompt, 'utf8');
   });
@@ -189,9 +212,14 @@ export async function runAgent(prompt: string, options: AgentRunOptions): Promis
     const version = await executeCli(executable, versionArgs, env, '', { ...options,
       timeoutMs: options.timeoutMs ? Math.min(options.timeoutMs, 10000) : 10000 });
     if (!compatibleVersion(version, provider)) throw new Error('AI_CLI_VERSION');
+    if (options.signal?.aborted) throw new Error('AI_CANCELLED');
     const remaining = options.timeoutMs ? options.timeoutMs - (Date.now() - started) : 0;
     if (options.timeoutMs && remaining <= 0) throw new Error('AI_TIMEOUT');
-    const output = await executeCli(executable, args, env, prompt, { ...options, timeoutMs: remaining });
+    // Claude's JSON output arrives only at the end, so it reports no intermediate activity.
+    const output = await executeCli(executable, args, env, prompt, { ...options, timeoutMs: remaining },
+      provider === 'gemini' ? line => {
+        try { options.onProgress?.(geminiActivity(JSON.parse(line))); } catch { options.onProgress?.(); }
+      } : undefined);
     let parsed: { answer: string; id: string; contextWindows?: Record<string, number> };
     try { parsed = provider === 'claude' ? parseClaude(output) : parseGemini(output); }
     catch (error) {

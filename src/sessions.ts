@@ -9,6 +9,9 @@ interface Session {
   contextWindows?: Record<string, number>;
 }
 
+/** Per-task cancellation and progress reporting; neither changes the CLI's permissions. */
+export interface TaskControl { signal?: AbortSignal; onProgress?: (activity?: string) => void }
+
 export interface SessionContextState { sessionId?: string; contextRunning: boolean; contextWindows?: Record<string, number> }
 
 interface SessionOptions extends AgentRunOptions { providers?: ProviderConfig; providerSource?: () => ProviderConfig | undefined }
@@ -54,7 +57,7 @@ export class AiSessions {
       + (identity.selection.effort ? ' effort:' + identity.selection.effort : '')
       + (project ? ' project:' + project : '');
     if (this.active?.key === identity.key) return `${label} is still running. Try ${command} result${provider} again after the task finishes.`;
-    return this.results.get(identity.key) ?? `No saved result for this user and channel. Send a task with ${command} run${provider} prompt:….`;
+    return this.results.get(identity.key) ?? `No saved result for this user and channel. Send a task with ${command} run${provider} prompt:…, or find earlier jobs with /ai jobs.`;
   }
 
   status(key: string, selection?: ProviderSelection): string {
@@ -79,11 +82,11 @@ export class AiSessions {
       ]),
       `Timeout: ${this.options.timeoutMs ? this.options.timeoutMs / 1000 + 's' : 'disabled'}`,
       `Bot uptime: ${Math.floor((Date.now() - this.started) / 1000)}s`,
-      'Commands: /ai run | /ai new | /ai status | /ai context | /ai clear | /ai result (select provider)',
+      'Commands: /ai run | /ai jobs | /ai stop | /ai new | /ai status | /ai context | /ai clear | /ai result (select provider)',
     ].join('\n');
   }
 
-  async prompt(key: string, prompt: string, selection?: ProviderSelection): Promise<string> {
+  async prompt(key: string, prompt: string, selection?: ProviderSelection, control: TaskControl = {}): Promise<string> {
     if (this.busy) throw new Error('CODEX_BUSY');
     const identity = this.identity(key, selection);
     key = identity.key;
@@ -96,7 +99,7 @@ export class AiSessions {
         ...this.options, ...identity.selection,
         claudeExecutable: (this.options.providerSource?.() ?? this.options.providers)?.claudeExecutable ?? this.options.claudeExecutable,
         geminiScript: (this.options.providerSource?.() ?? this.options.providers)?.geminiScript ?? this.options.geminiScript,
-        sessionId: session.id, onSession: (sessionId, windows) => { id = sessionId; contextWindows = windows ?? contextWindows; },
+        sessionId: session.id, signal: control.signal, onProgress: control.onProgress, onSession: (sessionId, windows) => { id = sessionId; contextWindows = windows ?? contextWindows; },
       });
       this.sessions.set(key, { id, turns: session.turns + 1, lastCompleted: new Date().toISOString(),
         ...(contextWindows ? { contextWindows } : {}) });
