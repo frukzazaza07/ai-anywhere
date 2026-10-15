@@ -85,6 +85,7 @@ Type `/` and select options from autocomplete.
 | `/ai models` | Load available models from the installed CLI |
 | `/ai projects` / `/ai project name:…` | List / switch projects |
 | `/ai status` / `/ai result` | Check progress / retrieve the latest answer |
+| `/ai context` | Show context window usage for the current Claude or Codex session |
 | `/ai new` / `/ai clear` | Reset the selected conversation and result |
 | `/ai schedules` / `/ai cancel id:…` | List / remove schedules |
 

@@ -40,6 +40,8 @@ function buildCommand() {
     .addSubcommand(command => sessionOptions(command
       .setName('status').setDescription('Show worker/session status; Codex also shows account usage')))
     .addSubcommand(command => sessionOptions(command
+      .setName('context').setDescription('Show context window usage for your current session (Claude, Codex)')))
+    .addSubcommand(command => sessionOptions(command
       .setName('clear').setDescription('Clear your current AI conversation context')))
     .addSubcommand(command => sessionOptions(command
       .setName('result').setDescription('Retrieve your latest completed AI task result')))

@@ -1,5 +1,5 @@
 import { runAgent, type AgentRunOptions } from './agent-runner.js';
-import { AiSessions } from './sessions.js';
+import { AiSessions, type SessionContextState } from './sessions.js';
 import { ProjectPreferences, type ProjectConfig, type ProjectSelection } from './projects.js';
 import { type ProviderConfig } from './providers.js';
 import { type RuntimeConfig } from './runtime-config.js';
@@ -48,7 +48,7 @@ export class ProjectSessions {
     return session;
   }
 
-  contextState(key: string, selection: SelectedProfile, project?: string): { sessionId?: string; contextRunning: boolean } {
+  contextState(key: string, selection: SelectedProfile, project?: string): SessionContextState {
     return this.session(key, project, selection).contextState(key, selection);
   }
 

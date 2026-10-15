@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { runCodex, terminateWorker, workerEnvironment, type RunOptions } from './runner.js';
 import { isModelName, isProviderId, type ProviderId } from './providers.js';
 import { validateEffort } from './effort.js';
+import { claudeContextWindows } from './claude-context.js';
 
 export interface AgentRunOptions extends RunOptions {
   provider?: ProviderId;
@@ -68,7 +69,7 @@ function sessionId(value: unknown): string {
   return value;
 }
 
-function parseClaude(text: string): { answer: string; id: string } {
+function parseClaude(text: string): { answer: string; id: string; contextWindows?: Record<string, number> } {
   const result = record(JSON.parse(text));
   if (result.type !== 'result' || result.subtype !== 'success' || result.is_error === true) {
     throw new Error('AI_TASK_FAILED');
@@ -77,7 +78,7 @@ function parseClaude(text: string): { answer: string; id: string } {
     throw new Error('AI_PERMISSION_DENIED');
   }
   if (typeof result.result !== 'string') throw new Error('AI_INVALID_OUTPUT');
-  return { answer: result.result, id: sessionId(result.session_id) };
+  return { answer: result.result, id: sessionId(result.session_id), contextWindows: claudeContextWindows(result.modelUsage) };
 }
 
 function parseGemini(text: string): { answer: string; id: string } {
@@ -191,7 +192,7 @@ export async function runAgent(prompt: string, options: AgentRunOptions): Promis
     const remaining = options.timeoutMs ? options.timeoutMs - (Date.now() - started) : 0;
     if (options.timeoutMs && remaining <= 0) throw new Error('AI_TIMEOUT');
     const output = await executeCli(executable, args, env, prompt, { ...options, timeoutMs: remaining });
-    let parsed: { answer: string; id: string };
+    let parsed: { answer: string; id: string; contextWindows?: Record<string, number> };
     try { parsed = provider === 'claude' ? parseClaude(output) : parseGemini(output); }
     catch (error) {
       if (error instanceof SyntaxError) throw new Error('AI_INVALID_OUTPUT');
@@ -200,7 +201,7 @@ export async function runAgent(prompt: string, options: AgentRunOptions): Promis
     const answer = parsed.answer.trim() || 'The CLI finished without a text response.';
     if (Buffer.byteLength(answer, 'utf8') > 1_000_000) throw new Error('AI_OUTPUT_LIMIT');
     if (options.sessionId && parsed.id !== options.sessionId) throw new Error('AI_INVALID_SESSION');
-    options.onSession?.(parsed.id);
+    options.onSession?.(parsed.id, parsed.contextWindows);
     return answer;
   } finally {
     await rm(temporary, { recursive: true, force: true });

@@ -17,7 +17,7 @@ export interface RunOptions {
   sessionId?: string;
   model?: string;
   effort?: Effort;
-  onSession?: (sessionId: string) => void;
+  onSession?: (sessionId: string, contextWindows?: Record<string, number>) => void;
   // Override only in local tests; never expose this setting through chat.
   cliScript?: string;
 }

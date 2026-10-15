@@ -4,7 +4,7 @@ import { commands, commandNames, createCommands } from '../src/commands.js';
 
 test('/ai exposes dynamic provider/profile options and leaves schedule management provider-neutral', () => {
   const definition = commands.find(command => command.name === 'ai')!.toJSON();
-  assert.deepEqual(definition.options?.map(option => option.name), ['run', 'new', 'status', 'clear', 'result', 'models', 'config', 'schedules', 'cancel', 'projects', 'project', 'init']);
+  assert.deepEqual(definition.options?.map(option => option.name), ['run', 'new', 'status', 'context', 'clear', 'result', 'models', 'config', 'schedules', 'cancel', 'projects', 'project', 'init']);
   for (const option of definition.options ?? []) {
     assert.equal(option.type, 1);
     if (option.type !== 1) continue;

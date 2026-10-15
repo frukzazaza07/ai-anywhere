@@ -6,7 +6,10 @@ interface Session {
   id?: string;
   turns: number;
   lastCompleted?: string;
+  contextWindows?: Record<string, number>;
 }
+
+export interface SessionContextState { sessionId?: string; contextRunning: boolean; contextWindows?: Record<string, number> }
 
 interface SessionOptions extends AgentRunOptions { providers?: ProviderConfig; providerSource?: () => ProviderConfig | undefined }
 
@@ -29,9 +32,11 @@ export class AiSessions {
     return { key: JSON.stringify([key, selected.provider, selected.model ?? '']), selection: selected };
   }
 
-  contextState(key: string, selection?: ProviderSelection): { sessionId?: string; contextRunning: boolean } {
+  contextState(key: string, selection?: ProviderSelection): SessionContextState {
     key = this.identity(key, selection).key;
-    return { sessionId: this.sessions.get(key)?.id, contextRunning: this.active?.key === key };
+    const session = this.sessions.get(key);
+    return { sessionId: session?.id, contextRunning: this.active?.key === key,
+      ...(session?.contextWindows ? { contextWindows: session.contextWindows } : {}) };
   }
 
   reset(key: string, selection?: ProviderSelection): void {
@@ -69,11 +74,12 @@ export class AiSessions {
       `Sandbox: ${this.options.sandbox}`,
       ...(identity.selection.provider === 'codex' ? [] : [
         'Permissions: file tools only; shell tools and custom integrations disabled.',
-        'Account quota and context usage: unavailable for this provider.',
+        identity.selection.provider === 'claude' ? 'Account quota: unavailable for this provider. Context usage: /ai context.'
+          : 'Account quota and context usage: unavailable for this provider.',
       ]),
       `Timeout: ${this.options.timeoutMs ? this.options.timeoutMs / 1000 + 's' : 'disabled'}`,
       `Bot uptime: ${Math.floor((Date.now() - this.started) / 1000)}s`,
-      'Commands: /ai run | /ai new | /ai status | /ai clear | /ai result (select provider)',
+      'Commands: /ai run | /ai new | /ai status | /ai context | /ai clear | /ai result (select provider)',
     ].join('\n');
   }
 
@@ -84,14 +90,16 @@ export class AiSessions {
     this.active = { key, started: Date.now() };
     const session = this.sessions.get(key) ?? { turns: 0 };
     let id = session.id;
+    let contextWindows = session.contextWindows;
     try {
       const result = await this.run(prompt, {
         ...this.options, ...identity.selection,
         claudeExecutable: (this.options.providerSource?.() ?? this.options.providers)?.claudeExecutable ?? this.options.claudeExecutable,
         geminiScript: (this.options.providerSource?.() ?? this.options.providers)?.geminiScript ?? this.options.geminiScript,
-        sessionId: session.id, onSession: sessionId => { id = sessionId; },
+        sessionId: session.id, onSession: (sessionId, windows) => { id = sessionId; contextWindows = windows ?? contextWindows; },
       });
-      this.sessions.set(key, { id, turns: session.turns + 1, lastCompleted: new Date().toISOString() });
+      this.sessions.set(key, { id, turns: session.turns + 1, lastCompleted: new Date().toISOString(),
+        ...(contextWindows ? { contextWindows } : {}) });
       this.results.set(key, result);
       return result;
     } catch (error) {

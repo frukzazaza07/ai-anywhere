@@ -13,6 +13,7 @@ import { initializeConfig } from './init-config.js';
 import { initDialogPrefix, initializationDialog, submitInitialization } from './init-dialog.js';
 import { helpReply } from './help.js';
 import { codexLimitsStatus } from './limits.js';
+import { claudeContextStatus } from './claude-context.js';
 import { deliverTaskReply, taskErrorMessage, taskReply } from './results.js';
 import { Shutdown } from './shutdown.js';
 import { modelCatalog, modelsText } from './models.js';
@@ -257,6 +258,19 @@ client.on(Events.InteractionCreate, interaction => {
             : [],
           allowedMentions: { parse: [] },
         });
+      } catch (error) { await interaction.editReply(taskReply(taskErrorMessage(error, selection.provider))); }
+      return;
+    }
+    if (action === 'context') {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      try {
+        checkRevision();
+        const state = sessions.contextState(key, selection, project.project);
+        const content = 'Project: ' + project.project + '\n' + (selection.provider === 'claude'
+          ? await claudeContextStatus({ workdir: project.workdir, ...state })
+          : selection.provider === 'codex' ? await codexLimitsStatus({ workdir: project.workdir, includeContext: true, ...state })
+            : label + ' context usage is unavailable for this provider.');
+        await interaction.editReply(taskReply(content, selection.provider));
       } catch (error) { await interaction.editReply(taskReply(taskErrorMessage(error, selection.provider))); }
       return;
     }

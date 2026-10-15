@@ -13,7 +13,7 @@ test('/ai offers scheduling options and management subcommands', () => {
   assert.deepEqual(definitions.map(command => command.name), ['ai', 'ai-admin', 'help']);
   assert.deepEqual([...commandNames], ['ai', 'ai-admin', 'help']);
   const actions = definitions[0]?.options ?? [];
-  assert.deepEqual(actions.map(action => action.name), ['run', 'new', 'status', 'clear', 'result', 'models', 'config', 'schedules', 'cancel', 'projects', 'project', 'init']);
+  assert.deepEqual(actions.map(action => action.name), ['run', 'new', 'status', 'context', 'clear', 'result', 'models', 'config', 'schedules', 'cancel', 'projects', 'project', 'init']);
   assert.ok(actions.every(action => action.type === 1));
   const run = actions[0];
   assert.ok(run && run.type === 1);
