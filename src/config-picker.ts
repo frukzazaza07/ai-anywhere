@@ -15,6 +15,9 @@ export function configPicker(runtime: RuntimeConfig, preferences: ProviderPrefer
   const selectedProvider = provider ?? preferences.selectedProvider(key) ?? config.providers.defaultProvider;
   if (!isProviderId(selectedProvider) || !config.providers.enabled.has(selectedProvider)) throw new Error('AI_PROVIDER_DISABLED');
   const saved = preferences.get(key, selectedProvider);
+  // Without personal choices the shared default profile applies, including its effort.
+  const profileEffort = provider == null && !preferences.selectedProvider(key) ? config.profiles.get(config.defaultProfile)?.effort : undefined;
+  const selectedEffort = saved ? saved.effort ?? undefined : profileEffort;
   const selectedModel = saved && Object.hasOwn(saved, 'model') ? saved.model ?? undefined
     : provider == null && !preferences.selectedProvider(key) ? config.profiles.get(config.defaultProfile)?.model : config.providers.models[selectedProvider];
   const models = [...(config.providers.allowedModels?.[selectedProvider] ?? [])];
@@ -31,8 +34,8 @@ export function configPicker(runtime: RuntimeConfig, preferences: ProviderPrefer
       ...models.slice(page * pageSize, (page + 1) * pageSize).map((value, index) => ({ label: value.slice(0, 100),
         value: value.length > 100 ? '__index__' + (page * pageSize + index) : value, default: value === selectedModel })),
     ]),
-    menu('effort', 'Choose effort', [{ label: 'CLI default', value: 'default', default: !saved?.effort },
-      ...providerEffortChoices(config.providers, selectedProvider, selectedModel).map(value => ({ label: value, value, default: value === saved?.effort }))]),
+    menu('effort', 'Choose effort', [{ label: 'CLI default', value: 'default', default: !selectedEffort },
+      ...providerEffortChoices(config.providers, selectedProvider, selectedModel).map(value => ({ label: value, value, default: value === selectedEffort }))]),
   ];
   if (pages > 1) components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId(id('page-' + Math.max(0, page - 1))).setLabel('Previous models').setStyle(ButtonStyle.Secondary).setDisabled(page === 0),
@@ -41,7 +44,7 @@ export function configPicker(runtime: RuntimeConfig, preferences: ProviderPrefer
   components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId(id('refresh')).setLabel('Refresh models from CLI').setStyle(ButtonStyle.Secondary)));
   return { content: 'Your AI configuration for this channel\nProvider: ' + providerLabels[selectedProvider]
-    + '\nModel: ' + (selectedModel ?? 'CLI default') + ' | Effort: ' + (saved?.effort ?? 'CLI default')
+    + '\nModel: ' + (selectedModel ?? 'CLI default') + ' | Effort: ' + (selectedEffort ?? 'CLI default')
     + '\nEach selection is saved immediately. Omitted prompt options use your saved choices.'
     + '\nExplicit provider/model/effort options apply to one prompt; a named profile uses its own model.'
     + (note ? '\n' + note : '')

@@ -87,6 +87,10 @@ function buildCommand() {
         .setMaxLength(32).setAutocomplete(true)));
 }
 
+function profileEffort(option: SlashCommandStringOption): SlashCommandStringOption {
+  return option.setName('effort').setDescription('Reasoning effort for this profile; omit for CLI default').setMaxLength(16).setAutocomplete(true);
+}
+
 function adminCommand() {
   return new SlashCommandBuilder().setName('ai-admin').setDescription('Manage local AI runtime configuration')
     .addSubcommand(command => command.setName('status').setDescription('Inspect config without exposing local paths'))
@@ -102,12 +106,14 @@ function adminCommand() {
       .addStringOption(option => option.setName('name').setDescription('New profile name').setRequired(true).setMinLength(1).setMaxLength(32))
       .addStringOption(option => option.setName('provider').setDescription('Registered provider').setRequired(true).setAutocomplete(true))
       .addStringOption(option => option.setName('project').setDescription('Project alias bound to this profile').setRequired(true).setAutocomplete(true))
-      .addStringOption(option => option.setName('model').setDescription('Allowed model; omit for CLI default').setMaxLength(120).setAutocomplete(true)))
+      .addStringOption(option => option.setName('model').setDescription('Allowed model; omit for CLI default').setMaxLength(120).setAutocomplete(true))
+      .addStringOption(profileEffort))
     .addSubcommand(command => command.setName('profile-set').setDescription('Create or replace a project/provider/model profile')
       .addStringOption(option => option.setName('name').setDescription('Profile name').setRequired(true).setMaxLength(32).setAutocomplete(true))
       .addStringOption(option => option.setName('provider').setDescription('Locally installed provider').setRequired(true).setAutocomplete(true))
       .addStringOption(option => option.setName('project').setDescription('Project alias bound to this profile').setRequired(true).setAutocomplete(true))
-      .addStringOption(option => option.setName('model').setDescription('Allowed model; omit for CLI default').setAutocomplete(true)))
+      .addStringOption(option => option.setName('model').setDescription('Allowed model; omit for CLI default').setAutocomplete(true))
+      .addStringOption(profileEffort))
     .addSubcommand(command => command.setName('profile-delete').setDescription('Delete a profile after changing defaults')
       .addStringOption(option => option.setName('name').setDescription('Profile name').setRequired(true).setAutocomplete(true)))
     .addSubcommand(command => command.setName('project').setDescription('Enable or disable a locally configured project')

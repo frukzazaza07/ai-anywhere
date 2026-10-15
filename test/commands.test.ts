@@ -77,7 +77,7 @@ test('provider-add offers supported adapters and model IDs; profile-add accepts 
   assert.deepEqual(adapter.choices?.map(choice => choice.value), ['codex', 'claude', 'gemini']);
   const profile = admin.options!.find(option => option.name === 'profile-add')!;
   assert.ok(profile.type === 1);
-  assert.deepEqual(profile.options?.map(option => option.name), ['name', 'provider', 'project', 'model']);
+  assert.deepEqual(profile.options?.map(option => option.name), ['name', 'provider', 'project', 'model', 'effort']);
   assert.ok(profile.options![0]!.type === 3 && profile.options![0]!.required && !profile.options![0]!.autocomplete);
   assert.ok(profile.options![1]!.type === 3 && profile.options![1]!.required && profile.options![1]!.autocomplete);
   assert.ok(profile.options![2]!.type === 3 && profile.options![2]!.required && profile.options![2]!.autocomplete);

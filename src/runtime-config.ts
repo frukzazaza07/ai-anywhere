@@ -5,10 +5,11 @@ import { dirname, isAbsolute, resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { providerConfig } from './config.js';
 import { isProjectName, prepareProjectDirectory, prepareProjectPath, projectConfig, type ProjectConfig } from './projects.js';
-import { isModelName, isProviderId, providerIds, type ProviderConfig, type ProviderId } from './providers.js';
+import { isModelName, isProviderId, providerIds, validateProviderEffort, type ProviderConfig, type ProviderId } from './providers.js';
 import { parseModelCatalog, type CliModel } from './model-catalog.js';
+import { isEffort, type Effort } from './effort.js';
 
-export interface Profile { provider: ProviderId; model?: string; project?: string }
+export interface Profile { provider: ProviderId; model?: string; effort?: Effort; project?: string }
 interface LocalProject { directory: string; enabled: boolean }
 interface LocalProvider { enabled: boolean; models: string[]; defaultModel?: string; executable?: string; script?: string }
 interface BaseConfig {
@@ -57,9 +58,11 @@ function object(value: unknown, keys?: readonly string[]): Record<string, unknow
 function name(value: unknown): string { if (!isProjectName(value)) return invalid(); return value; }
 function enabled(value: unknown): boolean { if (typeof value !== 'boolean') return invalid(); return value; }
 function profile(value: unknown): Profile {
-  const p = object(value, ['provider', 'model', 'project']);
-  if (!isProviderId(p.provider) || (p.model !== undefined && !isModelName(p.model))) return invalid();
+  const p = object(value, ['provider', 'model', 'effort', 'project']);
+  if (!isProviderId(p.provider) || (p.model !== undefined && !isModelName(p.model))
+    || (p.effort !== undefined && !isEffort(p.effort))) return invalid();
   return { provider: p.provider, ...(p.model !== undefined ? { model: p.model as string } : {}),
+    ...(p.effort !== undefined ? { effort: p.effort as Effort } : {}),
     ...(p.project !== undefined ? { project: name(p.project) } : {}) };
 }
 function parseBase(value: unknown, baseDirectory: string): BaseConfig {
@@ -362,11 +365,16 @@ export class RuntimeConfig {
           if (change.project === undefined && change.profile === undefined) return invalid();
         }
         const next = snapshot(this.base, overrides, this.current.revision + 1, this.current.source);
+        // Effort is checked against the provider/model capabilities when the profile is saved;
+        // later catalog changes are reported when the profile is used.
+        if ((change.kind === 'profile' || change.kind === 'add-profile') && change.profile.effort !== undefined) {
+          validateProviderEffort(next.providers, change.profile.provider, change.profile.model, change.profile.effort);
+        }
         try { await (this.options.write ?? atomicConfigWrite)(this.options.overridesFile, JSON.stringify(overrides, null, 2) + '\n'); }
         catch { throw new Error('AI_CONFIG_SAVE'); }
         this.overrides = overrides; this.current = next;
       } catch (error) {
-        if (error instanceof Error && ['AI_CONFIG_SAVE', 'AI_PROFILE_EXISTS'].includes(error.message)) throw error;
+        if (error instanceof Error && ['AI_CONFIG_SAVE', 'AI_PROFILE_EXISTS', 'AI_EFFORT_INVALID'].includes(error.message)) throw error;
         throw new Error('AI_CONFIG_INVALID');
       }
     });
@@ -480,6 +488,7 @@ export class RuntimeConfig {
       'Projects: ' + [...c.projects.directories.keys()].map(key => key + (c.projects.enabled?.has(key) ? '' : ' (disabled)')).join(', '),
       'Providers: ' + [...c.installedProviders].map(key => key + (c.providers.enabled.has(key) ? '' : ' (disabled)')).join(', '),
       'Profiles:', ...[...c.profiles].map(([key, p]) => key + ': ' + p.provider + ' / ' + (p.model ?? 'CLI default')
+        + (p.effort ? ' / effort: ' + p.effort : '')
         + ' / project: ' + (p.project ?? 'current project (legacy)'))].join('\n');
   }
 }

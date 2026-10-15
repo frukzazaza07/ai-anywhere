@@ -46,7 +46,7 @@ test('focused help guides explain the chosen family and important selection/sche
   assert.match(helpText('admin'), /Usage: \/ai init \[project:NAME\] \[profile:NAME\]/);
   assert.match(helpText('admin'), /form asking for default project\/profile aliases/);
   assert.match(helpText('admin'), /tasks remain blocked until init completes/);
-  assert.match(helpText('admin'), /Omit model for CLI default/);
+  assert.match(helpText('admin'), /Omit model or effort for the CLI default/);
   assert.match(helpText('admin'), /restoring a target does not automatically resume paused jobs/);
   assert.doesNotMatch(helpText('admin'), /Usage: \/ai run/);
 });

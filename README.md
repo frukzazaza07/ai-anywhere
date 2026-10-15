@@ -102,7 +102,7 @@ Choose just `profile:…` to select its **project + provider + model**, or use `
 
 Profiles bind a configured project alias, so switching your current project does not redirect them. A conflicting `project` override is rejected; use direct provider/model/project options to choose another target. Existing profiles without a project keep using your current project until an admin binds them with `profile-set`. Profiles with the same project directory/provider/model share conversation history and the latest result.
 
-Personal settings survive restart; task options override them once. Profiles use their own model. `model:__default__` / `effort:default` selects CLI defaults. **Refresh models from CLI** updates choices after installation/login.
+Personal settings survive restart; task options override them once. When an admin changes the default profile, earlier personal settings stop applying until saved again with `/ai config`. Profiles may set an effort (`/ai-admin profile-add … effort:high`). Profiles use their own model. `model:__default__` / `effort:default` selects CLI defaults. **Refresh models from CLI** updates choices after installation/login.
 
 ## Settings
 

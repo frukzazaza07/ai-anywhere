@@ -1,4 +1,4 @@
-import { cliDefaultModel, providerEffortChoices, selectProvider, validateProviderEffort, validateSelection, type ProviderSelection } from './providers.js';
+import { cliDefaultModel, isProviderId, providerEffortChoices, selectProvider, validateProviderEffort, validateSelection, type ProviderSelection } from './providers.js';
 import { type RuntimeSnapshot } from './runtime-config.js';
 import { selectProject } from './projects.js';
 
@@ -15,7 +15,8 @@ export function profileProject(selection: SelectedProfile, project?: string | nu
 export function selectCommand(config: RuntimeSnapshot, provider?: string | null,
   profile?: string | null, model?: string | null, effort?: string | null): SelectedProfile {
   if (effort != null) {
-    const selected = selectCommand(config, provider, profile, model);
+    // An explicit effort replaces the profile's effort; default selects the CLI default.
+    const { effort: _profileEffort, ...selected } = selectCommand(config, provider, profile, model);
     const chosenEffort = effort === 'default' ? undefined : validateProviderEffort(config.providers, selected.provider, selected.model, effort);
     return { ...selected, ...(chosenEffort !== undefined ? { effort: chosenEffort } : {}) };
   }
@@ -52,7 +53,11 @@ export function autocomplete(config: RuntimeSnapshot, access: Access, auth: Acce
   if (!authorized(access, auth, admin || adminOnly)) return [];
   let values: string[] = [];
   if (option === 'root' && admin) values = [...config.projectRoots.keys()];
-  if (option === 'effort') {
+  if (option === 'effort' && admin) {
+    // Profile effort: capabilities of the chosen provider/model; omit the option for the CLI default.
+    if (!isProviderId(provider) || !config.installedProviders.has(provider)) return [];
+    values = [...providerEffortChoices(config.providers, provider, model ?? undefined)];
+  } else if (option === 'effort') {
     try {
       const selected = selectCommand(config, provider, profile, model);
       values = ['default', ...providerEffortChoices(config.providers, selected.provider, selected.model)];

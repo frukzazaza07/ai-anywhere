@@ -21,6 +21,7 @@ import { ProviderPreferences } from './provider-preferences.js';
 import { configPickerPrefix, configPicker, updateConfigPicker } from './config-picker.js';
 import { ModelCatalogService } from './model-catalog-service.js';
 import { JobHistory, JobManager, ownerFromKey } from './jobs.js';
+import { isEffort } from './effort.js';
 import { changesReply } from './changes.js';
 
 const discord = discordConfig();
@@ -30,7 +31,7 @@ const runtime = new RuntimeConfig({ file: resolve('ai.config.json'), overridesFi
 await runtime.load();
 if (runtime.value.source === 'setup') console.log('Initial setup required: run /ai init as an allowed admin. The default project candidate is the bot startup directory.');
 const worker = workerConfig(runtime.value);
-const preferences = new ProviderPreferences(resolve('.ai-preferences.json'));
+const preferences = new ProviderPreferences(resolve('.ai-preferences.json'), undefined, () => runtime.value.defaultProfile);
 await preferences.load();
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 const sessions = new ProjectSessions({ ...worker, runtime });
@@ -111,7 +112,7 @@ client.on(Events.InteractionCreate, interaction => {
         focused.name, String(focused.value), provider,
         interaction.commandName === 'ai' && interaction.options.getSubcommand(false) === 'init',
         profile, interaction.options.getString('model')
-          ?? (saved && Object.hasOwn(saved, 'model') ? saved.model ?? cliDefaultModel : undefined)));
+          ?? (interaction.commandName !== 'ai-admin' && saved && Object.hasOwn(saved, 'model') ? saved.model ?? cliDefaultModel : undefined)));
       return;
     }
     if (!interaction.isChatInputCommand() || !commandNames.has(interaction.commandName)) return;
@@ -175,9 +176,11 @@ client.on(Events.InteractionCreate, interaction => {
           if (action === 'profile-set' || action === 'profile-add') {
             const provider = interaction.options.getString('provider', true);
             if (!isProviderId(provider)) throw new Error('AI_CONFIG_INVALID');
+            const effort = interaction.options.getString('effort');
+            if (effort !== null && !isEffort(effort)) throw new Error('AI_EFFORT_INVALID');
             change = { kind: action === 'profile-add' ? 'add-profile' : 'profile', name: interaction.options.getString('name', true),
               profile: { provider, model: interaction.options.getString('model') ?? undefined,
-                project: interaction.options.getString('project', true) } };
+                ...(effort !== null ? { effort } : {}), project: interaction.options.getString('project', true) } };
           } else if (action === 'provider-add') {
             const provider = interaction.options.getString('provider', true);
             if (!isProviderId(provider)) throw new Error('AI_CONFIG_INVALID');

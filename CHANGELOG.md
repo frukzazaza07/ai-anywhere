@@ -3,6 +3,9 @@
 ## 1.0.0-beta.1 (release candidate; not published)
 
 ### Added
+- Profiles can store a reasoning effort: `/ai-admin profile-add` and `profile-set` accept optional `effort:` (autocomplete lists levels supported by the provider/model; omit for CLI default). A prompt's `effort:` overrides it for one request and `effort:default` selects the CLI default. Re-register commands after upgrading.
+- Changing the default profile with `/ai-admin defaults profile:…` now takes effect for everyone: personal `/ai config` choices saved under a previous default (including all choices saved before this release) stop applying until the user saves new ones. Changing only the default project keeps personal choices.
+
 - Job history: every task (including each schedule run) is a job with an 8-character ID, saved privately in `.ai-jobs/` with owner, prompt, project/provider/model, state, start/finish times and result. `/ai jobs` lists your recent jobs; `/ai result id:…` opens one after restart. Only the owner can view a job. The newest 200 jobs are kept. Jobs interrupted by restart are marked failed and never replayed.
 - `/ai stop [id:…]` stops a running job or withdraws a queued one. Owners can stop their own jobs, including scheduled runs; admins can stop any job. The CLI process tree is terminated and confirmed gone before the worker accepts new work. Files already changed are not reverted, and the conversation resumes from the last completed turn. Stopped repeating schedules run again at their next interval.
 - `/ai run queue:true` waits in a FIFO queue (at most 5 jobs) when the worker is busy; jobs still run one at a time. Queued jobs show their position and are cancelled, not replayed, on restart or shutdown.
@@ -35,6 +38,7 @@
 - Restricted file tool execution, local CLI version checks and bounded structured output handling for additional providers.
 
 ### Fixed
+- Adding `effort:` to a prompt that uses the default profile no longer drops the profile's project binding.
 - Restarting after saved project/default-profile overrides pauses legacy schedules whose captured project is disabled instead of failing startup. Saved overrides and original job targets are preserved.
 - Release scanning rejects symbolic links and directory junctions before reading candidate or package metadata files, enforces repository containment and private-file exclusions, and checks the opened file's identity.
 - Claude/Gemini model discovery now checks supported CLI versions before protocol initialization, with bounded version output and one timeout budget across the version probe and metadata session.
