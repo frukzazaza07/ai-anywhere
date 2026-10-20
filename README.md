@@ -180,6 +180,8 @@ keep their targets. Duplicate providers/profiles are rejected: use
 `/ai-admin provider` to enable an existing provider or `profile-set` to replace a
 profile. `/ai-admin defaults profile:writer` changes the shared default.
 
+On Windows hosts, `/ai-admin shutdown confirm:true delay:5` powers off the bot computer after 1–60 minutes (default 1) by running `shutdown.exe` directly, without a shell. It is rejected while a worker runs; `/ai-admin shutdown-cancel` aborts it during the delay.
+
 `profile-add` and `profile-set` require a project alias; omit model for CLI default. To bind an existing profile, use `/ai-admin profile-set name:review provider:claude project:web model:sonnet`. Local JSON profiles accept `"project": "web"` alongside `provider` and `model`. Build, restart and run `npm run register` once after upgrading for the new admin options. Profile changes that move or remove a captured project binding pause pending schedules; cancel and recreate them.
 
 Build, restart the bot and run `npm run register` once after upgrading to expose

@@ -23,6 +23,7 @@ import { ModelCatalogService } from './model-catalog-service.js';
 import { JobHistory, JobManager, ownerFromKey } from './jobs.js';
 import { isEffort } from './effort.js';
 import { changesReply } from './changes.js';
+import { hostPower } from './host-power.js';
 
 const discord = discordConfig();
 let jobs: JobManager | undefined;
@@ -163,6 +164,24 @@ client.on(Events.InteractionCreate, interaction => {
       try {
         if (shutdown.stopping) throw new Error('AI_SHUTTING_DOWN');
         await interaction.editReply(taskReply(await initializeConfig(runtime, access, auth, defaults)));
+      } catch (error) { await interaction.editReply(taskReply(taskErrorMessage(error))); }
+      return;
+    }
+    if (interaction.commandName === 'ai-admin' && (action === 'shutdown' || action === 'shutdown-cancel')) {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      try {
+        if (action === 'shutdown-cancel') {
+          await interaction.editReply(taskReply(await hostPower('cancel')));
+          return;
+        }
+        if (!interaction.options.getBoolean('confirm', true)) {
+          await interaction.editReply(taskReply('Shutdown not confirmed. Use confirm:true to power off the host.'));
+          return;
+        }
+        if (shutdown.stopping) throw new Error('AI_SHUTTING_DOWN');
+        if (manager.busy || runtime.updating) throw new Error('CODEX_BUSY');
+        await interaction.editReply(taskReply(await hostPower('shutdown', interaction.options.getInteger('delay') ?? 1)));
+        console.log('Host shutdown scheduled from Discord.');
       } catch (error) { await interaction.editReply(taskReply(taskErrorMessage(error))); }
       return;
     }

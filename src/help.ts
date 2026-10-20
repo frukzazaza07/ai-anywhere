@@ -107,6 +107,12 @@ export const commandHelp: readonly CommandHelp[] = [
   { command: '/ai-admin defaults', description: 'Set the shared default project and/or profile.',
     usage: '/ai-admin defaults [project:PROJECT] [profile:PROFILE]', example: '/ai-admin defaults project:web profile:review',
     notes: 'Supply at least one option and select enabled/usable targets. Saved jobs retain their original targets. Users who selected a project keep that preference. Changing the default profile replaces personal /ai config choices saved earlier: everyone uses the new default until they choose again with /ai config.' },
+  { command: '/ai-admin shutdown', description: 'Power off the computer running the bot after a delay (Windows hosts only).',
+    usage: '/ai-admin shutdown confirm:true [delay:MINUTES]', example: '/ai-admin shutdown confirm:true delay:5',
+    notes: 'delay is 1–60 minutes (default 1). Rejected while a worker runs. The bot goes offline with the computer; scheduled jobs that start before then are interrupted and marked failed after restart. Use shutdown-cancel within the delay to abort.' },
+  { command: '/ai-admin shutdown-cancel', description: 'Abort a host shutdown scheduled with /ai-admin shutdown.',
+    usage: '/ai-admin shutdown-cancel', example: '/ai-admin shutdown-cancel',
+    notes: 'Available while the worker is busy. Reports when no shutdown is scheduled.' },
 ];
 
 const selectionGuide = [
@@ -162,7 +168,7 @@ export function helpReply(topic: string | null = null) {
     '**/ai**: run — send/schedule/queue a task; status — worker/session information; context — context window usage; result — latest answer or a job by id; jobs — your job history; stop — end or unqueue a job; changes — files a job changed; new / clear — reset the selected conversation.',
     '**/ai**: models — list model choices; projects — list aliases; project — switch your current project; schedules — list your jobs; cancel — remove a schedule (use stop for a running task).',
     '**/ai init** (admins only): finish first-install configuration with optional default project/profile choices; existing files are preserved.',
-    '**/ai-admin** (admins only): status — inspect config; reload — reload local files; provider-add — register a CLI; profile-add / profile-set / profile-delete — manage profiles; project / provider — enable or disable; project-add — register/create a project folder; defaults — change shared defaults.',
+    '**/ai-admin** (admins only): status — inspect config; reload — reload local files; provider-add — register a CLI; profile-add / profile-set / profile-delete — manage profiles; project / provider — enable or disable; project-add — register/create a project folder; defaults — change shared defaults; shutdown / shutdown-cancel — power off the host or abort.',
     '',
     'Quick start: /ai run prompt:Review the code → /ai jobs → /ai result id:JOB_ID → /ai changes id:JOB_ID',
     'Use autocomplete for configured aliases and models. Choose profile OR provider/model on /ai; omit selection for the default profile. Replies are private.',

@@ -48,7 +48,8 @@ test('command definitions are independent of project inventory and accept more t
 test('only admin project-add accepts a directory; executable overrides remain local', () => {
   const admin = commands.find(command => command.name === 'ai-admin')!.toJSON();
   assert.deepEqual(admin.options?.map(option => option.name),
-    ['status', 'reload', 'provider-add', 'profile-add', 'profile-set', 'profile-delete', 'project', 'project-add', 'provider', 'defaults']);
+    ['status', 'reload', 'provider-add', 'profile-add', 'profile-set', 'profile-delete', 'project', 'project-add', 'provider', 'defaults',
+      'shutdown', 'shutdown-cancel']);
   for (const action of admin.options ?? []) {
     if (action.type !== 1) continue;
     assert.ok(action.options?.every(option => !['executable', 'script', 'path'].includes(option.name)

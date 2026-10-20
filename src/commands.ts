@@ -132,7 +132,11 @@ function adminCommand() {
       .addBooleanOption(option => option.setName('enabled').setDescription('Enable this provider').setRequired(true)))
     .addSubcommand(command => command.setName('defaults').setDescription('Change the default project and/or profile')
       .addStringOption(option => option.setName('project').setDescription('Enabled project alias').setAutocomplete(true))
-      .addStringOption(option => option.setName('profile').setDescription('Usable profile').setAutocomplete(true)));
+      .addStringOption(option => option.setName('profile').setDescription('Usable profile').setAutocomplete(true)))
+    .addSubcommand(command => command.setName('shutdown').setDescription('Shut down the bot host computer (Windows) after a delay')
+      .addBooleanOption(option => option.setName('confirm').setDescription('Set true to confirm powering off the host').setRequired(true))
+      .addIntegerOption(option => option.setName('delay').setDescription('Minutes before shutdown (default 1)').setMinValue(1).setMaxValue(60)))
+    .addSubcommand(command => command.setName('shutdown-cancel').setDescription('Abort a scheduled host shutdown'));
 }
 
 // Retain the previous local signature; the inventory no longer affects registration.

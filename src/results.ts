@@ -23,6 +23,9 @@ export function taskErrorMessage(error: unknown, provider: ProviderId = 'codex')
       case 'AI_PROJECT_CLEANUP': return 'Project addition failed and its new folder could not be safely cleaned up. The previous configuration remains active. Check local storage before retrying.';
       case 'AI_INIT_STALE': return 'The configuration changed or the bot restarted while this setup form was open. Run /ai init again to use the current choices.';
       case 'AI_SHUTTING_DOWN': return 'The bot is shutting down. Try again after it restarts.';
+      case 'AI_HOST_POWER_UNSUPPORTED': return 'Host shutdown is only supported when the bot runs on Windows.';
+      case 'AI_HOST_POWER_DELAY': return 'Choose a shutdown delay from 1 to 60 minutes.';
+      case 'AI_HOST_POWER_FAILED': return 'Windows rejected the shutdown request. Check that the bot account may shut down this computer.';
       case 'AI_TIMEOUT': return label + ' timeout';
       case 'AI_QUEUE_FULL': return 'The job queue is full. Try again after queued jobs finish, or remove one with /ai stop id:….';
       case 'AI_QUEUE_CANCELLED': return 'The queued job was removed before it started; it did not run.';

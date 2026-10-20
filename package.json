@@ -15,7 +15,7 @@
     "register": "node --import tsx src/register.ts",
     "dev": "node --import tsx src/bot.ts",
     "build": "tsc",
-    "start": "node dist/bot.js",
+    "start": "tsc && node dist/bot.js",
     "test": "node --import tsx --test test/*.test.ts"
   },
   "files": [
