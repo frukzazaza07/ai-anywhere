@@ -29,6 +29,17 @@ export function taskTimeoutMs(value?: string): number {
   return seconds * 1000;
 }
 
+export const maxWorkerLimit = 8;
+
+/** Concurrent AI jobs; 1 keeps a single shared worker. Each project directory still runs one job at a time. */
+export function maxWorkers(value?: string): number {
+  const workers = Number(value?.trim() || 1);
+  if (!Number.isInteger(workers) || workers < 1 || workers > maxWorkerLimit) {
+    throw new Error('AI_MAX_WORKERS must be an integer from 1 to ' + maxWorkerLimit);
+  }
+  return workers;
+}
+
 export function adminUserIds(value = process.env.ADMIN_USER_IDS): Set<string> {
   if (!value?.trim()) return new Set();
   const ids = value.split(',').map(id => id.trim());
@@ -42,6 +53,7 @@ export function workerConfig(runtime?: RuntimeSnapshot): {
   workdir: string;
   sandbox: 'read-only' | 'workspace-write';
   timeoutMs: number;
+  maxWorkers: number;
   providers: ProviderConfig;
   projects: ProjectConfig;
 } {
@@ -54,7 +66,7 @@ export function workerConfig(runtime?: RuntimeSnapshot): {
     throw new Error('CODEX_SANDBOX must be read-only or workspace-write');
   }
   return { allowedUsers: new Set(ids), adminUsers: adminUserIds(), workdir, sandbox,
-    timeoutMs: taskTimeoutMs(process.env.CODEX_TIMEOUT_SECONDS), providers: runtime?.providers ?? providerConfig(), projects };
+    timeoutMs: taskTimeoutMs(process.env.CODEX_TIMEOUT_SECONDS), maxWorkers: maxWorkers(process.env.AI_MAX_WORKERS), providers: runtime?.providers ?? providerConfig(), projects };
 }
 
 export function providerConfig(env: NodeJS.ProcessEnv = process.env): ProviderConfig {

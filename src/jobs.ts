@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { mkdir, readdir, readFile, rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import { atomicConfigWrite } from './runtime-config.js';
 import { isModelName, isProviderId, providerLabels, type ProviderId } from './providers.js';
 import { isEffort, type Effort } from './effort.js';
@@ -194,11 +194,23 @@ export interface JobRequest {
   schedule?: { id: string; run: number };
 }
 export interface SubmittedJob { job: JobRecord; position: number; result: Promise<string> }
-export type StopOutcome = 'stopping' | 'already-stopping' | 'dequeued' | 'finished' | 'denied' | 'not-found' | 'idle';
+export type StopOutcome = 'stopping' | 'already-stopping' | 'dequeued' | 'finished' | 'denied' | 'not-found' | 'idle' | 'ambiguous';
+
+/** Same folder, or one inside the other: jobs there could edit the same files. */
+export function overlappingDirectories(a: string, b: string): boolean {
+  const normal = (path: string) => {
+    const full = resolve(path);
+    return (process.platform === 'win32' ? full.toLowerCase() : full).replace(/[\\/]+$/, '');
+  };
+  const [x, y] = [normal(a), normal(b)];
+  return x === y || x.startsWith(y + sep) || y.startsWith(x + sep);
+}
 
 interface Entry {
   record: JobRecord;
   key: string;
+  // Canonical project directory; one job per directory (or nested directory) runs at a time.
+  workdir: string;
   selection: SelectedProfile;
   controller: AbortController;
   result: Promise<string>;
@@ -216,33 +228,54 @@ interface JobManagerOptions {
   sessions: Pick<ProjectSessions, 'prompt' | 'currentProject' | 'busy' | 'shutdown'>;
   sandbox: 'read-only' | 'workspace-write';
   queueLimit?: number;
+  // Concurrent jobs across different project directories (default 1).
+  maxWorkers?: number;
   // Returns undefined to skip change tracking (tests, read-only projects).
   tracker?: (workdir: string) => Promise<ChangeTracker | undefined>;
   now?: () => number;
 }
 
 /**
- * Every AI task runs as a job: one shared worker, a bounded FIFO queue, durable history,
- * owner/admin stop, progress reporting and per-job Git changes.
+ * Every AI task runs as a job: up to maxWorkers concurrent jobs with one job per project directory,
+ * a bounded queue (FIFO per project), durable history, owner/admin stop, progress and per-job Git changes.
  */
 export class JobManager {
-  private active?: Entry;
-  private running?: Promise<void>;
+  private readonly active = new Map<string, Entry>();
+  private readonly running = new Set<Promise<void>>();
   private readonly queue: Entry[] = [];
   private closing = false;
   private readonly now: () => number;
 
   constructor(private readonly options: JobManagerOptions) { this.now = options.now ?? Date.now; }
 
-  get busy(): boolean { return this.active !== undefined || this.queue.length > 0 || this.options.sessions.busy; }
+  /** Any job running or queued; configuration changes wait for this to clear. */
+  get busy(): boolean { return this.active.size > 0 || this.queue.length > 0 || this.options.sessions.busy; }
   get queueLimit(): number { return this.options.queueLimit ?? jobQueueLimit; }
+  get maxWorkers(): number { return this.options.maxWorkers ?? 1; }
+  /** Every worker is in use. */
+  get full(): boolean { return this.active.size >= this.maxWorkers; }
+
+  /** A running job, or a job queued ahead of position `before`, uses this directory. */
+  private projectBusy(workdir: string, before = this.queue.length): boolean {
+    return [...this.active.values()].some(entry => overlappingDirectories(entry.workdir, workdir))
+      || this.queue.slice(0, before).some(entry => overlappingDirectories(entry.workdir, workdir));
+  }
+
+  /** Why a new job for this target cannot start now, or undefined when it can. */
+  blockedReason(key: string, selection: SelectedProfile, project?: string): 'project' | 'workers' | undefined {
+    let workdir: string;
+    // Invalid targets are reported by submit with their specific error.
+    try { workdir = this.options.sessions.currentProject(key, project, selection).workdir; } catch { return undefined; }
+    if (this.projectBusy(workdir)) return 'project';
+    return this.full ? 'workers' : undefined;
+  }
 
   /** Claims the worker synchronously, or queues when requested; never awaits before claiming. */
   submit(request: JobRequest): SubmittedJob {
     if (this.closing) throw new Error('AI_SHUTTING_DOWN');
     const key = ownerKey(request.owner);
     const project = this.options.sessions.currentProject(key, request.project, request.selection);
-    const busy = this.busy;
+    const busy = this.full || this.projectBusy(project.workdir);
     if (busy && !request.queue) throw new Error('CODEX_BUSY');
     if (busy && this.queue.length >= this.queueLimit) throw new Error('AI_QUEUE_FULL');
     const { selection } = request;
@@ -259,7 +292,7 @@ export class JobManager {
     const result = new Promise<string>((onResolve, onReject) => { resolve = onResolve; reject = onReject; });
     // Callers may stop listening (for example an expired Discord reply).
     void result.catch(() => {});
-    const entry: Entry = { record, key, selection, controller: new AbortController(), result, resolve, reject };
+    const entry: Entry = { record, key, workdir: project.workdir, selection, controller: new AbortController(), result, resolve, reject };
     if (busy) {
       this.queue.push(entry);
       this.persist(record);
@@ -275,12 +308,13 @@ export class JobManager {
   }
 
   private start(entry: Entry): void {
-    this.active = entry;
+    this.active.set(entry.record.id, entry);
     Object.assign(entry.record, { state: 'running', started: this.now() });
     entry.phase = 'preparing';
     this.persist(entry.record);
     const running = this.execute(entry);
-    this.running = running;
+    this.running.add(running);
+    void running.then(() => this.running.delete(running));
   }
 
   private async execute(entry: Entry): Promise<void> {
@@ -313,17 +347,21 @@ export class JobManager {
     record.finished = this.now();
     await this.options.history.save({ ...record }).then(() => this.options.history.prune())
       .catch(() => console.error('Unable to save job history. Check local storage permissions.'));
-    // Release the worker and start the next queued job without yielding, so nothing can run in between.
-    this.active = undefined;
-    this.running = undefined;
+    // Release the worker and start queued jobs without yielding, so nothing can run in between.
+    this.active.delete(record.id);
     if ('value' in outcome) entry.resolve(outcome.value); else entry.reject(outcome.error);
     this.next();
   }
 
+  /** Start queued jobs in order while workers are free, skipping jobs whose project is still busy. */
   private next(): void {
-    if (this.active || this.closing) return;
-    const entry = this.queue.shift();
-    if (entry) this.start(entry);
+    if (this.closing) return;
+    for (let index = 0; index < this.queue.length && !this.full;) {
+      const entry = this.queue[index]!;
+      if (this.projectBusy(entry.workdir, index)) { index++; continue; }
+      this.queue.splice(index, 1);
+      this.start(entry);
+    }
   }
 
   private owns(requester: Requester, job: JobOwner): boolean {
@@ -331,13 +369,19 @@ export class JobManager {
   }
 
   /** Owners stop their own jobs; admins may stop any job. Queued jobs are removed without running. */
-  stop(requester: Requester, id?: string | null): { outcome: StopOutcome; job?: JobRecord } {
+  stop(requester: Requester, id?: string | null): { outcome: StopOutcome; job?: JobRecord; jobs?: JobRecord[] } {
     let entry: Entry | undefined;
     if (id == null) {
-      entry = this.active;
-      if (!entry) return { outcome: 'idle' };
+      // Without an ID: the requester's only running job, or (for admins) the only running job.
+      const running = [...this.active.values()];
+      const mine = running.filter(item => this.owns(requester, item.record));
+      const candidates = mine.length || !requester.admin ? mine : running;
+      if (!running.length) return { outcome: 'idle' };
+      if (candidates.length > 1) return { outcome: 'ambiguous', jobs: candidates.map(item => ({ ...item.record })) };
+      if (!candidates.length) return { outcome: 'denied' };
+      entry = candidates[0]!;
     } else {
-      entry = this.active?.record.id === id ? this.active : this.queue.find(item => item.record.id === id);
+      entry = this.live(id);
       if (!entry) {
         const past = isJobId(id) ? this.options.history.get(id) : undefined;
         if (!past || (!this.owns(requester, past) && !requester.admin)) return { outcome: 'not-found' };
@@ -368,13 +412,13 @@ export class JobManager {
       this.persist(entry.record);
       entry.reject(new Error('AI_SHUTTING_DOWN'));
     }
-    await this.running;
+    await Promise.allSettled([...this.running]);
     await this.options.sessions.shutdown();
     await this.options.history.flush();
   }
 
   private live(id: string): Entry | undefined {
-    return this.active?.record.id === id ? this.active : this.queue.find(entry => entry.record.id === id);
+    return this.active.get(id) ?? this.queue.find(entry => entry.record.id === id);
   }
 
   private visible(requester: Requester): (job: JobRecord) => boolean {
@@ -391,8 +435,11 @@ export class JobManager {
       return 'Job ' + id + ': ' + job.state + (job.started && job.finished ? ' in ' + formatDuration(job.finished - job.started) : '') + '.';
     }
     if (job.state === 'queued') {
-      return 'Job ' + id + ': queued · position ' + (this.queue.indexOf(entry) + 1) + ' of ' + this.queue.length
-        + ' · waiting ' + formatDuration(now - job.created) + '\nIt starts automatically when the worker is free. Remove it: /ai stop id:' + id;
+      const position = this.queue.indexOf(entry);
+      const waitingFor = this.projectBusy(entry.workdir, position) ? 'the job ahead of it in project ' + job.project + ' finishes'
+        : this.maxWorkers > 1 ? 'a worker is free' : 'the worker is free';
+      return 'Job ' + id + ': queued · position ' + (position + 1) + ' of ' + this.queue.length
+        + ' · waiting ' + formatDuration(now - job.created) + '\nIt starts automatically when ' + waitingFor + '. Remove it: /ai stop id:' + id;
     }
     const lines = ['Job ' + id + ': running · ' + formatDuration(now - (job.started ?? now)) + ' elapsed'
       + (entry.controller.signal.aborted ? ' · stopping' : '')];
@@ -422,7 +469,7 @@ export class JobManager {
 
   /** Running/queued jobs owned by the requester, for /ai status. */
   activeText(requester: Requester): string {
-    return [this.active, ...this.queue].filter((entry): entry is Entry => !!entry && this.owns(requester, entry.record))
+    return [...this.active.values(), ...this.queue].filter(entry => this.owns(requester, entry.record))
       .map(entry => this.progress(entry.record.id)).join('\n\n');
   }
 
@@ -445,7 +492,7 @@ export class JobManager {
         + ' · ' + (prompt.length > 60 ? prompt.slice(0, 57) + '…' : prompt));
     }
     if (requester.admin) {
-      const others = [this.active, ...this.queue].filter((entry): entry is Entry => !!entry && !this.owns(requester, entry.record));
+      const others = [...this.active.values(), ...this.queue].filter(entry => !this.owns(requester, entry.record));
       if (others.length) lines.push('', 'Other users\' active jobs (admin):', ...others.map(entry => '`' + entry.record.id + '` '
         + entry.record.state + ' · ' + entry.record.project + ' · ' + providerLabels[entry.record.provider]));
     }
@@ -475,8 +522,8 @@ export class JobManager {
   choices(requester: Requester, query: string, includeActive = false): Array<{ name: string; value: string }> {
     const jobs = this.list(requester, 50);
     if (includeActive && requester.admin) {
-      for (const entry of [this.active, ...this.queue]) {
-        if (entry && !jobs.some(job => job.id === entry.record.id)) jobs.unshift({ ...entry.record });
+      for (const entry of [...this.active.values(), ...this.queue]) {
+        if (!jobs.some(job => job.id === entry.record.id)) jobs.unshift({ ...entry.record });
       }
     }
     return jobs.filter(job => (!includeActive || !finalStates.includes(job.state))

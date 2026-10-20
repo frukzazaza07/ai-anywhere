@@ -12,7 +12,7 @@ Private reporting must be enabled and tested by the repository owner before publ
 
 ## Trust boundary
 
-This bot is for trusted, explicitly allowlisted users in one configured guild. It is unsuitable for public or mutually untrusted tenants. All tasks share the host OS account, installed CLI accounts, billing/quota and one worker. Project/provider/model session isolation prevents accidental conversation mixing; it does not provide separate OS accounts, containers or filesystem security boundaries.
+This bot is for trusted, explicitly allowlisted users in one configured guild. It is unsuitable for public or mutually untrusted tenants. All tasks share the host OS account, installed CLI accounts and billing/quota. By default they also share one worker; `AI_MAX_WORKERS` allows up to 8 concurrent CLI processes (one per project folder), multiplying quota use and host load. Project/provider/model session isolation prevents accidental conversation mixing; it does not provide separate OS accounts, containers or filesystem security boundaries.
 
 Workers inherit the host environment with Discord settings and user allowlists removed. Other environment variables, provider credentials and host CLI configuration can remain accessible. Run under a dedicated OS account with only the necessary filesystem and account permissions. Avoid secrets in configured projects. Prompts, file content and responses may be sent to the selected AI provider; ephemeral Discord replies are not end-to-end encrypted.
 

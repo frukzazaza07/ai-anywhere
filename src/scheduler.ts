@@ -96,7 +96,10 @@ interface SchedulerOptions {
   sandbox: string;
   guildId: string;
   allowedUsers: ReadonlySet<string>;
+  // True when no job can start (for example every worker is in use).
   busy: () => boolean;
+  // Optional per-job check, such as whether the job's project already has a running job.
+  ready?: (key: string, selection: ProviderSelection, project?: string) => boolean;
   // Each dispatch is a separate job; the schedule ID and run number keep runs apart in history.
   run: (key: string, prompt: string, selection: ProviderSelection, project?: string, schedule?: { id: string; run: number }) => Promise<string>;
   providers?: ProviderConfig;
@@ -132,7 +135,8 @@ export class CodexScheduler {
   private writing: Promise<void> = Promise.resolve();
   private ticking = false;
   private closing = false;
-  private activeTick?: Promise<void>;
+  // Dispatches still claiming or finishing a run; several can be in flight with multiple workers.
+  private readonly inflight = new Set<Promise<void>>();
   private pauseDirty = false;
   private timer?: ReturnType<typeof setInterval>;
   private readonly now: () => number;
@@ -214,6 +218,9 @@ export class CodexScheduler {
     this.pauseDirty ||= changed;
     if (this.pauseDirty) { await this.save(); this.pauseDirty = false; }
   }
+  private selection(job: ScheduledJob): ProviderSelection {
+    return { provider: job.provider ?? 'codex', model: job.model, ...(job.effort ? { effort: job.effort } : {}) };
+  }
   private advance(job: ScheduledJob): void {
     if (job.intervalMs) job.nextRun += Math.max(1, Math.floor((this.now() - job.nextRun) / job.intervalMs) + 1) * job.intervalMs;
   }
@@ -276,7 +283,7 @@ export class CodexScheduler {
     this.stop();
     // A dispatch may be saving its claim or finishing a task. Drain it before the final save.
     // A transient dispatch save failure should not prevent a final durable flush.
-    await this.activeTick?.catch(() => {});
+    await Promise.allSettled([...this.inflight]);
     await this.save();
   }
 
@@ -284,18 +291,21 @@ export class CodexScheduler {
     if (this.closing || this.ticking || this.options.busy() || this.options.runtime?.updating) return Promise.resolve();
     this.ticking = true;
     const tick = this.dispatch();
-    this.activeTick = tick;
-    void tick.then(() => { if (this.activeTick === tick) this.activeTick = undefined; },
-      () => { if (this.activeTick === tick) this.activeTick = undefined; });
+    this.inflight.add(tick);
+    void tick.then(() => this.inflight.delete(tick), () => this.inflight.delete(tick));
     return tick;
   }
 
   private async dispatch(): Promise<void> {
+    let claiming = true;
+    // Only the claim is exclusive; the run itself may overlap other dispatches when workers are free.
+    const release = () => { if (claiming) { claiming = false; this.ticking = false; } };
     try {
       const prepare = async () => {
         if (this.closing || this.options.busy()) return;
         if (this.pauseDirty) await this.refreshConfig();
-        const job = [...this.jobs.values()].filter(item => item.state === 'pending' && item.nextRun <= this.now())
+        const job = [...this.jobs.values()].filter(item => item.state === 'pending' && item.nextRun <= this.now()
+          && (this.options.ready?.(scheduleKey(item), this.selection(item), item.project) ?? true))
           .sort((a, b) => a.nextRun - b.nextRun)[0];
         if (!job) return;
         if (!this.authorized(job)) {
@@ -306,14 +316,16 @@ export class CodexScheduler {
         try { await this.save(); }
         catch (error) { job.state = 'pending'; throw error; }
         if (this.jobs.get(job.id) !== job) return;
-        if (this.closing || this.options.busy()) { job.state = 'pending'; await this.save(); return; }
+        if (this.closing || this.options.busy() || !(this.options.ready?.(scheduleKey(job), this.selection(job), job.project) ?? true)) {
+          job.state = 'pending'; await this.save(); return;
+        }
         // Release the config gate after the session synchronously claims the shared worker.
-        const result = (async () => this.options.run(scheduleKey(job), job.prompt,
-          { provider: job.provider ?? 'codex', model: job.model, ...(job.effort ? { effort: job.effort } : {}) }, job.project,
+        const result = (async () => this.options.run(scheduleKey(job), job.prompt, this.selection(job), job.project,
           { id: job.id, run: job.runs + 1 }))();
         return { job, result };
       };
       const started = this.options.runtime ? await this.options.runtime.exclusive(prepare) : await prepare();
+      release();
       if (!started) return;
       const { job } = started;
       let outcome: string;
@@ -348,7 +360,7 @@ export class CodexScheduler {
       };
       if (this.options.runtime) await this.options.runtime.exclusive(complete);
       else await complete();
-    } finally { this.ticking = false; }
+    } finally { release(); }
   }
 }
 

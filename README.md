@@ -115,6 +115,7 @@ Personal settings survive restart; task options override them once. When an admi
 | `.codex-schedules.json` | Saved schedules |
 | `.ai-jobs/` | Job history: prompts, results and per-job diffs (newest 200 jobs) |
 | `CODEX_SANDBOX=read-only` | Read files; use `workspace-write` to allow edits |
+| `AI_MAX_WORKERS=1` | Concurrent jobs (1–8); each project folder still runs one job at a time |
 | `CODEX_TIMEOUT_SECONDS=0` | No deadline; a positive number sets seconds for every provider |
 
 Keep private settings out of Git and AI-accessible project folders. Run one bot instance.
@@ -221,7 +222,7 @@ Schedules survive restart and keep their original targets/settings. Changed/disa
 
 ## Limits and safety
 
-- One shared worker. Immediate requests are rejected while busy unless `queue:true` is set; up to 5 queued jobs then run one at a time in order. Queued jobs are cancelled, not replayed, on restart or shutdown.
+- Workers: `AI_MAX_WORKERS` (default 1, maximum 8) jobs run at once across all users, but only one per project folder (nested folders count as the same project). Immediate requests are rejected when no worker is free or the project is busy unless `queue:true` is set; up to 5 queued jobs then start automatically, in order within each project. Admin configuration changes still wait until every worker is idle. Queued jobs are cancelled, not replayed, on restart or shutdown.
 - Job history (prompts, results, diffs) is kept in `.ai-jobs/` across restarts; jobs interrupted by a restart are marked failed and never replayed. Conversations, current-project choices and the in-memory latest result disappear on restart. Sessions are isolated by server/channel/user + folder + provider/model.
 - Prompts: 4,000 characters. Results: 1 MB; long answers become attachments. Replies expire after 15 minutes; use `/ai result id:…`.
 - Accounts, quota, billing, and host access are shared. Allow trusted users only.

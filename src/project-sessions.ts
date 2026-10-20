@@ -9,20 +9,26 @@ interface ProjectSessionOptions extends AgentRunOptions {
   projects: ProjectConfig;
   providers?: ProviderConfig;
   runtime?: RuntimeConfig;
+  // Concurrent tasks across directories; one task per directory. 1 keeps a single shared worker.
+  maxWorkers?: number;
 }
 
-/** One shared worker guard over independent provider sessions for each configured directory. */
+/** Worker limit over independent provider sessions for each configured directory (one task per directory). */
 export class ProjectSessions {
   private readonly sessions = new Map<string, AiSessions>();
   private readonly preferences: ProjectPreferences;
   private closing = false;
-  private active?: Promise<string>;
+  private readonly active = new Set<Promise<string>>();
 
   constructor(private readonly options: ProjectSessionOptions, private readonly run: typeof runAgent = runAgent) {
     this.preferences = new ProjectPreferences(() => options.runtime?.value.projects ?? options.projects);
   }
 
   get busy(): boolean { return [...this.sessions.values()].some(session => session.busy); }
+  get maxWorkers(): number { return this.options.maxWorkers ?? 1; }
+  get running(): number { return [...this.sessions.values()].filter(session => session.busy).length; }
+  // With one worker, preference switches and resets wait for any active task, as before.
+  private get shared(): boolean { return this.maxWorkers <= 1; }
 
   currentProject(key: string, override?: string | null, selection?: SelectedProfile): ProjectSelection {
     if (this.options.runtime?.value.source === 'setup') throw new Error('AI_SETUP_REQUIRED');
@@ -31,7 +37,7 @@ export class ProjectSessions {
 
   switchProject(key: string, name: string): ProjectSelection {
     if (this.options.runtime?.value.source === 'setup') throw new Error('AI_SETUP_REQUIRED');
-    if (this.busy) throw new Error('CODEX_BUSY');
+    if (this.shared && this.busy) throw new Error('CODEX_BUSY');
     return this.preferences.switch(key, name);
   }
 
@@ -53,7 +59,8 @@ export class ProjectSessions {
   }
 
   reset(key: string, selection: SelectedProfile, project?: string): void {
-    if (this.busy) throw new Error('CODEX_BUSY');
+    if (this.shared && this.busy) throw new Error('CODEX_BUSY');
+    // The project's own session rejects resets while it runs a task.
     this.session(key, project, selection).reset(key, selection);
   }
 
@@ -64,25 +71,27 @@ export class ProjectSessions {
 
   status(key: string, selection: SelectedProfile, project?: string): string {
     const selected = this.currentProject(key, project, selection);
-    // The project-local worker may be idle while another project owns the shared worker.
+    // The project-local session may be idle while other projects use the workers.
     return 'Project: ' + selected.project + '\n'
       + (selection.profile ? 'Profile: ' + selection.profile + '\n' : '')
       + this.session(key, selected.project).status(key, selection)
-        .replace(/^Worker: (busy|idle)$/m, 'Worker: ' + (this.busy ? 'busy' : 'idle'));
+        .replace(/^Worker: (busy|idle)$/m, this.shared ? 'Worker: ' + (this.busy ? 'busy' : 'idle')
+          : 'Workers: ' + this.running + '/' + this.maxWorkers + ' busy');
   }
 
   async shutdown(): Promise<void> {
     this.closing = true;
-    await this.active?.catch(() => {});
+    await Promise.allSettled([...this.active]);
   }
 
   async prompt(key: string, prompt: string, selection: SelectedProfile, project?: string, control: TaskControl = {}): Promise<string> {
     if (this.closing) throw new Error('AI_SHUTTING_DOWN');
-    if (this.busy) throw new Error('CODEX_BUSY');
+    const session = this.session(key, project, selection);
+    if (session.busy || this.running >= this.maxWorkers) throw new Error('CODEX_BUSY');
     // No await before the underlying session claims the worker.
-    const result = this.session(key, project, selection).prompt(key, prompt, selection, control);
-    this.active = result;
-    const settle = () => { if (this.active === result) this.active = undefined; };
+    const result = session.prompt(key, prompt, selection, control);
+    this.active.add(result);
+    const settle = () => { this.active.delete(result); };
     // Register cleanup without creating an unhandled rejection on task failure.
     void result.then(settle, settle);
     return result;

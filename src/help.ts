@@ -22,7 +22,7 @@ function sessionHelp(): CommandHelp[] {
     { command: prefix + ' run', description: 'Send a task to the local AI worker, or save it to run later.',
       usage: prefix + ' run prompt:TEXT' + selection + ' [at:DATE | after:DURATION | every:DURATION] [queue:true]',
       example: prefix + ' run' + exampleSelection + ' prompt:Review the code and suggest improvements',
-      notes: 'prompt is required (1–4,000 characters). Omit timing to run now; choose at most one timing option. Every task gets a job ID and its private reply updates every 30 seconds with state, elapsed time and the latest activity the provider reports (Claude reports only when finished). Immediate tasks are rejected while the shared worker is busy unless queue:true is set: queued jobs start automatically one at a time in order (at most 5 waiting). Queued jobs are cancelled, not replayed, if the bot restarts.' },
+      notes: 'prompt is required (1–4,000 characters). Omit timing to run now; choose at most one timing option. Every task gets a job ID and its private reply updates every 30 seconds with state, elapsed time and the latest activity the provider reports (Claude reports only when finished). Up to AI_MAX_WORKERS jobs (host setting, default 1) run at once, but only one per project folder (a folder inside another counts as the same). Immediate tasks are rejected when no worker is free or the project already has a job, unless queue:true is set: queued jobs start automatically, in order within each project (at most 5 waiting). Queued jobs are cancelled, not replayed, if the bot restarts.' },
     { command: prefix + ' new', description: 'Start a fresh conversation and discard the selected session’s saved result.',
       usage: prefix + ' new' + selection, example: prefix + ' new' + exampleSelection,
       notes: 'Project files, CLI history on disk and schedules remain. Rejected while the worker is busy.' },
@@ -40,7 +40,7 @@ function sessionHelp(): CommandHelp[] {
       notes: 'With id, shows that job (from /ai jobs or autocomplete) including after restart; running and queued jobs show progress instead. Only the job owner can open it. Without id: reuse the task profile alone, or the same provider/model/project. Profiles bind project/provider/model. Legacy profiles without project use your current project. A conflicting project override is rejected. The latest per-session result is kept in memory until reset/restart; job history keeps results on disk.' },
     { command: prefix + ' stop', description: 'Stop a running job or withdraw a queued job, including a scheduled run you own.',
       usage: prefix + ' stop [id:JOB_ID]', example: prefix + ' stop id:1a2b3c4d',
-      notes: 'Omit id to stop the running job. Owners can stop their own jobs; admins can stop any job. Terminates the CLI process tree and frees the worker after it has exited. Files it already changed are not reverted (see /ai changes), and the conversation resumes from the last completed turn. Queued jobs are removed without running. Finished or unknown jobs are reported, never affected. A stopped repeating schedule runs again at its next interval. Works while the worker is busy.' },
+      notes: 'Omit id to stop your running job; if several run, choose one by id. Owners can stop their own jobs; admins can stop any job. Terminates the CLI process tree and frees the worker after it has exited. Files it already changed are not reverted (see /ai changes), and the conversation resumes from the last completed turn. Queued jobs are removed without running. Finished or unknown jobs are reported, never affected. A stopped repeating schedule runs again at its next interval. Works while the worker is busy.' },
     { command: prefix + ' jobs', description: 'List your recent jobs with ID, state, duration, project and prompt preview.',
       usage: prefix + ' jobs', example: prefix + ' jobs',
       notes: 'Shows your 10 newest jobs in this server, including each schedule run separately and queue positions. Admins also see other users’ running/queued job IDs (without prompts) so they can stop them. History survives restart and keeps the newest 200 jobs. Works while the worker is busy.' },
@@ -145,7 +145,7 @@ export function helpText(topic: HelpTopic = 'all'): string {
     || (topic === 'admin' ? entry.command.startsWith('/ai-admin ') || entry.command === '/ai init' : entry.command.startsWith('/' + topic + ' ')));
   const sections = [
     'Bot command guide — ' + topic,
-    'All replies are private with mentions disabled. Access requires the configured server and user allowlist. One worker is shared across all users/projects/providers.',
+    'All replies are private with mentions disabled. Access requires the configured server and user allowlist. Workers (AI_MAX_WORKERS, default 1) are shared across all users/projects/providers, with one job per project folder at a time.',
     'Help is available while the worker is busy. Syntax: UPPERCASE values are placeholders; [brackets] indicate optional options and | means choose one alternative.',
   ];
   if (topic !== 'admin') sections.push(selectionGuide);

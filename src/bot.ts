@@ -38,7 +38,7 @@ const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 const sessions = new ProjectSessions({ ...worker, runtime });
 const history = new JobHistory(resolve('.ai-jobs'));
 await history.load();
-const manager = new JobManager({ history, sessions, sandbox: worker.sandbox });
+const manager = new JobManager({ history, sessions, sandbox: worker.sandbox, maxWorkers: worker.maxWorkers });
 jobs = manager;
 const auth = { guildId: discord.guildId, allowedUsers: worker.allowedUsers, adminUsers: worker.adminUsers };
 
@@ -48,7 +48,9 @@ const scheduler = new CodexScheduler({
   providers: worker.providers,
   projects: worker.projects,
   runtime,
-  busy: () => manager.busy, run: (key, prompt, selection, project, schedule) =>
+  // Schedules use any free worker whose project has no running or earlier queued job.
+  busy: () => manager.full, ready: (key, selection, project) => !manager.blockedReason(key, selection, project),
+  run: (key, prompt, selection, project, schedule) =>
     manager.submit({ owner: ownerFromKey(key), prompt, selection, project, schedule }).result,
 });
 await scheduler.load();
@@ -248,14 +250,17 @@ client.on(Events.InteractionCreate, interaction => {
     const requester = { ...access, admin: authorized(access, auth, true) };
     if (action === 'stop') {
       const id = interaction.options.getString('id');
-      const { outcome, job } = manager.stop(requester, id);
+      const { outcome, job, jobs } = manager.stop(requester, id);
       const target = 'Job ' + (job?.id ?? id ?? '');
       const content = {
         stopping: 'Stopping ' + target + '. Its CLI process tree is being terminated; files it already changed are not reverted. Check /ai result id:' + job?.id + ' for the outcome.',
         'already-stopping': target + ' is already stopping. Check /ai result id:' + job?.id + ' shortly.',
         dequeued: target + ' was removed from the queue before it started; it did not run.',
         finished: target + ' already finished (' + job?.state + '). Nothing to stop; see /ai result id:' + job?.id + '.',
-        denied: target + ' belongs to another user. Only its owner or an admin can stop it.',
+        denied: job ? target + ' belongs to another user. Only its owner or an admin can stop it.'
+          : 'You have no running job. Only the owners of the running jobs or an admin can stop them.',
+        ambiguous: 'Several jobs are running: ' + (jobs ?? []).map(item => item.id + ' (' + item.project + ')').join(', ')
+          + '. Choose one with /ai stop id:….',
         'not-found': 'Job ' + id + ' was not found. Use /ai jobs to list your jobs.',
         idle: 'No AI task is running.',
       }[outcome];
@@ -388,8 +393,14 @@ client.on(Events.InteractionCreate, interaction => {
       }
     }
     const queue = action === 'run' && (interaction.options.getBoolean('queue') ?? false);
-    if (manager.busy && !queue) {
-      await interaction.reply({ content: 'An AI worker is busy. Try again after the task finishes'
+    // Runs need a free worker and an idle project; with one worker, resets also wait for any job.
+    const blocked = action === 'run' ? (queue ? undefined : manager.blockedReason(key, selection, project.project))
+      : manager.maxWorkers <= 1 && manager.busy ? 'workers' : undefined;
+    if (blocked) {
+      await interaction.reply({ content: (blocked === 'project' && manager.maxWorkers > 1
+          ? 'Project ' + project.project + ' already has a running or queued job. Try again after it finishes'
+          : manager.maxWorkers > 1 ? 'All ' + manager.maxWorkers + ' AI workers are busy. Try again after a task finishes'
+            : 'An AI worker is busy. Try again after the task finishes')
           + (action === 'run' ? ', or add queue:true to wait in the queue.' : '.'),
         flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
       return;

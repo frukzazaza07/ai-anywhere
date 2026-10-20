@@ -47,7 +47,7 @@ The existing manual path remains supported: copy `ai.config.example.json` to `ai
 
 In your configured guild/channel, run `/help`, then `/ai run provider:codex prompt:List the top-level files and explain what this project does. Do not modify files.` The bot acknowledges privately and returns text or an attachment. Use `/ai result provider:codex` in the same channel/user scope if the reply expires, and `/ai status provider:codex` for worker/session state. `/ai new` starts a new conversation; `/ai clear` clears its in-memory conversation/result without deleting project files or CLI history.
 
-Only one worker runs across all users, projects and providers. Busy tasks are rejected; there is no queue. Results and sessions disappear on restart. To stop the bot, press Ctrl+C and wait for its active task to finish. A disabled deadline means a stuck task can delay shutdown indefinitely.
+By default one worker runs across all users, projects and providers; set `AI_MAX_WORKERS` (up to 8) to run jobs for different project folders at the same time. Busy tasks are rejected unless `/ai run` uses `queue:true`. Job history survives restart; conversations do not. To stop the bot, press Ctrl+C and wait for its active task to finish. A disabled deadline means a stuck task can delay shutdown indefinitely.
 
 ## Optional projects and providers
 

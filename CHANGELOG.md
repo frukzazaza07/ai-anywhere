@@ -3,6 +3,7 @@
 ## 1.0.0-beta.1 (release candidate; not published)
 
 ### Added
+- Multiple workers: set `AI_MAX_WORKERS` (1–8, default 1) to run jobs for different project folders at the same time. Each project folder (including nested folders) still runs one job at a time, so edits and `/ai changes` never mix. The queue starts jobs as soon as their project and a worker are free, in order within each project. Schedules use free workers too. `/ai stop` without an ID asks for one when several of your jobs run. Configuration changes, `/ai init` and host shutdown still require every worker to be idle. Restart after changing `.env`.
 - Profiles can store a reasoning effort: `/ai-admin profile-add` and `profile-set` accept optional `effort:` (autocomplete lists levels supported by the provider/model; omit for CLI default). A prompt's `effort:` overrides it for one request and `effort:default` selects the CLI default. Re-register commands after upgrading.
 - Changing the default profile with `/ai-admin defaults profile:…` now takes effect for everyone: personal `/ai config` choices saved under a previous default (including all choices saved before this release) stop applying until the user saves new ones. Changing only the default project keeps personal choices.
 
